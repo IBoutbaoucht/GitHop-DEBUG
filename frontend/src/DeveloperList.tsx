@@ -23,8 +23,10 @@ interface Developer {
   badges: Array<{ type: string; category?: string }>;
   personas: Record<string, number>;
   is_rising_star: boolean;
+  is_hall_of_fame: boolean;
+  is_trending_expert: boolean;
+  is_badge_holder: boolean;
   company?: string;
-  scout_source?: string;
   is_organization?: boolean;
   velocity_score?: number;
   primary_work?: {
@@ -71,6 +73,12 @@ const personaConfig: Record<string, { label: string; icon: any; color: string }>
 
 type ViewType = 'top' | 'rising' | 'expert' | 'badge';
 
+function normalizeBadge(str: string) {
+  return str
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, ""); 
+}
+
 const formatNumber = (num: any) => {
   if (!num) return "0"
   const val = typeof num === "string" ? parseInt(num) : num
@@ -79,7 +87,6 @@ const formatNumber = (num: any) => {
   return val.toString()
 }
 
-// Helper: Generate one-line claim to fame
 function getClaimToFame(dev: Developer): string {
   if (dev.primary_work?.repos?.[0]) {
     const repo = dev.primary_work.repos[0];
@@ -101,7 +108,7 @@ const viewThemes = {
     borderColor: 'border-amber-500/30',
     accentColor: 'text-amber-400',
     icon: Trophy,
-    metricLabel: 'Followers', // CHANGED: Specific to Hall of Fame
+    metricLabel: 'Followers',
     emptyIcon: '👑',
     emptyText: 'The legends of open source',
     cardHoverGlow: 'hover:shadow-amber-500/20'
@@ -131,7 +138,7 @@ const viewThemes = {
     borderColor: 'border-yellow-500/30',
     accentColor: 'text-yellow-400',
     icon: Medal,
-    metricLabel: 'Followers', // CHANGED: Influence metric for badge holders
+    metricLabel: 'Followers',
     emptyIcon: '🎖️',
     emptyText: 'Award-winning community leaders',
     cardHoverGlow: 'hover:shadow-yellow-500/20'
@@ -145,7 +152,6 @@ function DeveloperList() {
   const badgeScrollRef = useRef<HTMLDivElement>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // --- 1. Initialize State with Storage Check ---
   const [viewType, setViewType] = useState<ViewType>(() => {
     const type = searchParams.get('type');
     if (type === 'rising') return 'rising';
@@ -159,10 +165,22 @@ function DeveloperList() {
   });
 
   const [selectedPersona, setSelectedPersona] = useState<string | null>(() => {
-    return sessionStorage.getItem(`filter_persona_${viewType}`) || null;
+    // CRITICAL FIX: Only restore saved persona if the view is 'expert'
+    const type = searchParams.get('type');
+    if (type === 'expert') {
+        return sessionStorage.getItem(`filter_persona_${type}`) || null;
+    }
+    return null;
   });
 
-  const [selectedBadge, setSelectedBadge] = useState<string | null>(null);
+  const [selectedBadge, setSelectedBadge] = useState<string | null>(() => {
+    // RESTORE: Check session storage on load if we are in badge view
+    const type = searchParams.get('type');
+    if (type === 'badge') {
+        return sessionStorage.getItem(`filter_badge_${type}`) || null;
+    }
+    return null;
+  });
 
   const [devs, setDevs] = useState<Developer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -190,12 +208,27 @@ function DeveloperList() {
   }, [viewType]);
 
   useEffect(() => {
+    // 1. Language Persistence
     if (selectedLang) sessionStorage.setItem(`filter_lang_${viewType}`, selectedLang);
     else sessionStorage.removeItem(`filter_lang_${viewType}`);
 
-    if (selectedPersona) sessionStorage.setItem(`filter_persona_${viewType}`, selectedPersona);
-    else sessionStorage.removeItem(`filter_persona_${viewType}`);
-  }, [selectedLang, selectedPersona, viewType]);
+    // 2. Persona Persistence (Experts only)
+    if (viewType === 'expert') {
+      if (selectedPersona) sessionStorage.setItem(`filter_persona_${viewType}`, selectedPersona);
+      else sessionStorage.removeItem(`filter_persona_${viewType}`);
+    } else {
+      sessionStorage.removeItem(`filter_persona_expert`);
+    }
+
+    // 3. Badge Persistence (Badge view only) [NEW CODE HERE]
+    if (viewType === 'badge') {
+      if (selectedBadge) sessionStorage.setItem(`filter_badge_${viewType}`, selectedBadge);
+      else sessionStorage.removeItem(`filter_badge_${viewType}`);
+    } else {
+      sessionStorage.removeItem(`filter_badge_badge`);
+    }
+
+  }, [selectedLang, selectedPersona, selectedBadge, viewType]); // <--- Added selectedBadge here
 
   useEffect(() => {
     const typeParam = searchParams.get('type');
@@ -206,12 +239,25 @@ function DeveloperList() {
     
     setViewType(newView);
 
+    // 1. Restore Language
     const savedLang = sessionStorage.getItem(`filter_lang_${newView}`);
-    const savedPersona = sessionStorage.getItem(`filter_persona_${newView}`);
+    
+    // 2. Restore Persona
+    let savedPersona: string | null = null;
+    if (newView === 'expert') {
+      savedPersona = sessionStorage.getItem(`filter_persona_${newView}`);
+    }
+
+    // 3. Restore Badge [NEW CODE HERE]
+    let savedBadge: string | null = null;
+    if (newView === 'badge') {
+      savedBadge = sessionStorage.getItem(`filter_badge_${newView}`);
+    }
     
     setSelectedLang(savedLang);
     setSelectedPersona(savedPersona);
-    setSelectedBadge(null); 
+    setSelectedBadge(savedBadge); // <--- Use the variable, not null
+    
   }, [searchParams]);
 
   useLayoutEffect(() => {
@@ -239,34 +285,16 @@ function DeveloperList() {
   const fetchDevelopers = async () => {
     setIsLoading(true);
     try {
-      let url = `${API_BASE}/developers?limit=200`; 
-      
-      if (viewType !== 'badge') {
-         url += `&type=${viewType}`;
-      } 
+      let url = `${API_BASE}/developers?type=${viewType}`; 
       
       if (selectedLang) url += `&language=${encodeURIComponent(selectedLang)}`;
       if (selectedPersona) url += `&persona=${encodeURIComponent(selectedPersona)}`;
+      if (selectedBadge) url += `&badge=${encodeURIComponent(selectedBadge)}`; 
       
       const res = await fetch(url);
       const json = await res.json();
       
       let filtered = json.data || [];
-
-      if (viewType === 'badge') {
-        filtered = filtered.filter((d: Developer) => d.badges && d.badges.length > 0);
-        // Sort badge holders by followers (Influence)
-        filtered.sort((a: Developer, b: Developer) => b.followers_count - a.followers_count);
-        
-        if (selectedBadge) {
-          filtered = filtered.filter((d: Developer) => d.badges.some(b => b.type === selectedBadge));
-        }
-      }
-
-      // Sort by followers for Top View (Hall of Fame)
-      if (viewType === 'top') {
-        filtered.sort((a: Developer, b: Developer) => b.followers_count - a.followers_count);
-      }
 
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase();
@@ -405,9 +433,8 @@ function DeveloperList() {
     const rank = index + 1;
     const theme = viewThemes[currentView];
     
-    // CUSTOM METRIC DISPLAY LOGIC
     const getMetricValue = () => {
-      if (currentView === 'top' || currentView === 'badge') return formatNumber(dev.followers_count); // Updated to Followers
+      if (currentView === 'top' || currentView === 'badge') return formatNumber(dev.followers_count);
       if (currentView === 'rising') return `+${formatNumber(Math.round(dev.velocity_score || 0))}/mo`;
       if (currentView === 'expert') return dev.language_expertise?.expertise?.length || 0;
     };
@@ -428,7 +455,6 @@ function DeveloperList() {
           </div>
         )}
 
-        {/* MAIN METRIC (Followers for Top/Badge) Displayed Top Right */}
         {(currentView === 'top' || currentView === 'badge') && (
            <div className={`absolute top-3 right-3 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-black/20 backdrop-blur-md border border-white/5 ${theme.accentColor}`}>
               {getMetricIcon()}
@@ -604,7 +630,7 @@ function DeveloperList() {
                             {viewType === 'top' && <Trophy className="w-8 h-8 text-yellow-500" />}
                             {viewType === 'expert' && <Briefcase className="w-8 h-8 text-blue-500" />}
                             {viewType === 'rising' && <Zap className="w-8 h-8 text-orange-500" />}
-                            {viewType === 'badge' && <Award className="w-8 h-8 text-red-500" />} {/* Badge Icon */}
+                            {viewType === 'badge' && <Award className="w-8 h-8 text-red-500" />} 
                             
                             {viewType === 'top' && 'Global Hall of Fame'}
                             {viewType === 'expert' && 'Trending Experts'}
@@ -615,14 +641,13 @@ function DeveloperList() {
                             {viewType === 'top' && 'The most influential developers in open source history.'}
                             {viewType === 'expert' && 'Leaders in trending domains (AI, Rust, Web3).'}
                             {viewType === 'rising' && 'High-velocity talent < 2 years in the game.'}
-                            {viewType === 'badge' && 'Developers recognized by major tech organizations (GDE, MVP, Stars).'}
+                            {viewType === 'badge' && 'Developers recognized by major tech organizations.'}
                         </p>
                     </div>
                 </div>
 
                 <div className="space-y-6">
                   <div className="flex flex-col sm:flex-row gap-4">
-                    {/* SOPHISTICATED SEARCH BAR */}
                     <div className="relative group flex-1">
                       <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                         <Search className="h-5 w-5 text-gray-500 group-focus-within:text-purple-400 transition-colors" />
@@ -644,7 +669,6 @@ function DeveloperList() {
                       )}
                     </div>
 
-                    {/* CLEAR ALL FILTERS BUTTON */}
                     {(selectedLang || selectedPersona || selectedBadge) && (
                       <button
                         onClick={clearAllFilters}
@@ -656,25 +680,36 @@ function DeveloperList() {
                     )}
                   </div>
 
-                  {/* Tech Stack Filter (Simple Scroll) */}
-                  <div className="relative group">
-                    <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-                        <div className="flex items-center gap-2 mr-2 text-xs font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap px-2">
-                           Stack:
-                        </div>
-                        {['Rust', 'TypeScript', 'Python', 'Go', 'C++', 'Java', 'Kotlin', 'Swift'].map(lang => (
-                        <button
-                            key={lang}
-                            onClick={() => setSelectedLang(selectedLang === lang ? null : lang)}
-                            className={`px-4 py-1.5 rounded-lg text-xs font-bold border transition-all whitespace-nowrap ${
-                            selectedLang === lang
-                                ? 'bg-purple-500/20 text-purple-300 border-purple-500/50 shadow-[0_0_10px_rgba(168,85,247,0.2)]'
-                                : 'bg-gray-800/50 text-gray-400 border-white/5 hover:border-white/20 hover:text-white hover:bg-gray-800'
-                            }`}
-                        >
-                            {lang}
-                        </button>
-                        ))}
+                  {/* Tech Stack Filter (with Result Count) */}
+                  <div className="flex items-center gap-4">
+
+                    {/* Filter Scroll Area */}
+                    <div className="relative group flex-1 min-w-0"> {/* min-w-0 is critical for scroll within flex */}
+                      <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+                          <div className="flex items-center gap-2 mr-2 text-xs font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap px-2 border-l border-white/10 ml-2 pl-4">
+                             Stack:
+                          </div>
+                          {['Rust', 'TypeScript', 'Python', 'Go', 'C++', 'Java', 'Kotlin', 'Swift'].map(lang => (
+                          <button
+                              key={lang}
+                              onClick={() => setSelectedLang(selectedLang === lang ? null : lang)}
+                              className={`px-4 py-1.5 rounded-lg text-xs font-bold border transition-all whitespace-nowrap ${
+                              selectedLang === lang
+                                  ? 'bg-purple-500/20 text-purple-300 border-purple-500/50 shadow-[0_0_10px_rgba(168,85,247,0.2)]'
+                                  : 'bg-gray-800/50 text-gray-400 border-white/5 hover:border-white/20 hover:text-white hover:bg-gray-800'
+                              }`}
+                          >
+                              {lang}
+                          </button>
+                          ))}
+                      </div>
+                    </div>
+
+                    {/* SIDE TEXT: Result Count */}
+                    <div className="shrink-0 pl-1">
+                       <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">
+                         Found <span className="text-white">{formatNumber(devs.length)}</span> Devs
+                       </span>
                     </div>
                   </div>
 
@@ -762,7 +797,7 @@ function DeveloperList() {
                               <Award className="w-4 h-4 text-yellow-400" /> Filter:
                           </div>
                           
-                          {['GDE', 'GitHub Star', 'MVP', 'AWS Hero', 'Docker Captain'].map(badge => (
+                          {['GDE', 'GitHub Star', 'MVP', 'AWS Hero', 'Docker Captain','CKA', 'AWS Solutions Architect', 'CISSP', 'PSM', 'CCIE'].map(badge => (
                           <button
                               key={badge}
                               onClick={() => setSelectedBadge(selectedBadge === badge ? null : badge)}
@@ -805,7 +840,6 @@ function DeveloperList() {
                 <h3 className="text-xl font-bold text-gray-400 mb-2">No developers found</h3>
                 <p className="text-gray-600 mb-6">{viewThemes[viewType].emptyText}</p>
                 
-                {/* Smart Suggestions */}
                 {(selectedLang || selectedPersona || selectedBadge) && (
                   <div className="flex flex-col gap-3 items-center">
                     <p className="text-sm text-gray-500">Try these alternatives:</p>

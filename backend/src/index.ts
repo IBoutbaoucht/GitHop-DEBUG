@@ -30,8 +30,6 @@ async function getGithubIdFromLocal(localId: number): Promise<string | null> {
 
 // Test Endpoint
 app.post('/test' , async (req, res) => {
-   // Example test trigger
-   // await workerService.updateCommitActivity(); 
    res.status(202).json({ message: "Test trigger received." });
 })
 
@@ -115,9 +113,7 @@ app.post("/api/fetch/oussama", async (req, res) => {
 // 3. WORKER TRIGGERS (Background Jobs)
 // =============================================================================
 
-
 // CONTRIBUTORS
-// POST /api/workers/update-contributors?mode=missing (default) OR mode=all
 app.post("/api/workers/update-contributors", async (req, res) => {
   const mode = req.query.mode as string;
   try {
@@ -134,7 +130,6 @@ app.post("/api/workers/update-contributors", async (req, res) => {
 });
 
 // COMMIT ACTIVITY
-// POST /api/workers/update-commit-activity?mode=missing (default) OR mode=all
 app.post("/api/workers/update-commit-activity", async (req, res) => {
   const mode = req.query.mode as string;
   try {
@@ -151,7 +146,6 @@ app.post("/api/workers/update-commit-activity", async (req, res) => {
 });
 
 // RECENT COMMITS
-// POST /api/workers/update-recent-activity?mode=missing (default) OR mode=all
 app.post("/api/workers/update-recent-activity", async (req, res) => {
   const mode = req.query.mode as string;
   try {
@@ -168,94 +162,99 @@ app.post("/api/workers/update-recent-activity", async (req, res) => {
 });
 
 // MASTER RUNNER
-// POST /api/workers/run-all?mode=missing (default) OR mode=all
 app.post("/api/workers/run-all", async (req, res) => {
   const mode = req.query.mode as string;
   try {
     const forceAll = mode === 'all';
-    workerService.runAllJobs(forceAll); // Now accepts the flag
+    workerService.runAllJobs(forceAll); 
     res.status(202).json({ message: `All background jobs started (Force All: ${forceAll})` });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// runReposOneByOne
 app.post("/api/workers/runByOrder", async (req, res) => {
   try {
-    workerService.runReposOneByOne(); // Now accepts the flag
-    res.status(202).json({ message: `runReposOneByOne is Dakxi` });
+    workerService.runReposOneByOne(); 
+    res.status(202).json({ message: `runReposOneByOne started` });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
 });
-
-
-// !!!!! MISSING
-// app.post("/api/workers/:id/update-contributors", async (req, res) => {
-//   const repoId = parseInt(req.params.id);
-//   try {
-//     await workerService.updateContributors(repoId);
-//     res.status(202).json({ message: `Contributors of ID ${repoId} updated successfully` });
-//   } catch (error: any) {
-//     res.status(500).json({ error: error.message });
-//   }
-// });
-
-// !!!!!!! MISSING 
-
-// app.post("/api/repos/:id/refresh-commits", async (req, res) => {
-//   const repoId = parseInt(req.params.id);
-//   try {
-//     await workerService.updateRecentCommits(repoId);
-//     res.status(202).json({ message: `Commits refresh started for ID ${repoId}` });
-//   } catch (error: any) {
-//     res.status(500).json({ error: error.message });
-//   }
-// });
-
 
 // =============================================================================
 // 4. DATA READ ENDPOINTS (API)
 // =============================================================================
 
 // DEVELOPER ENDPOINTS
+
+// GET /api/developers
 app.get("/api/developers", async (req, res) => {
   try {
-    const { type, language, persona, limit = 50 } = req.query;
+    const {
+      type = "all",
+      language,
+      persona,
+      badge,
+      limit = 20000 
+    } = req.query;
 
-    let whereClauses = [];
-    let params: any[] = [];
-    let paramIdx = 1;
-    let orderByClause = 'd.total_stars_earned DESC'; 
+    let where = [];
+    let params = [];
+    let idx = 1;
 
-    if (type === 'rising') {
-      whereClauses.push(`d.is_rising_star = TRUE`);
-      orderByClause = 'd.velocity_score DESC';
+    // -----------------------------
+    // NEW BOOLEAN FILTERING
+    // -----------------------------
+    if (type === "top") {
+      where.push(`d.is_hall_of_fame = TRUE`);
     } 
-    else if (type === 'expert') {
-      whereClauses.push(`(d.scout_source = 'trending_expert' OR d.personas != '{}'::jsonb)`);
-      if (!persona) orderByClause = 'd.total_stars_earned DESC';
+    else if (type === "expert") {
+      where.push(`d.is_trending_expert = TRUE`);
+    }
+    else if (type === "rising") {
+      where.push(`d.is_rising_star = TRUE`);
+    }
+    else if (type === "badge") {
+      where.push(`d.is_badge_holder = TRUE`);
     }
     else {
-      whereClauses.push(`d.followers_count > 100`); 
-      orderByClause = 'd.followers_count DESC';
+      where.push(`d.followers_count >= 0`);
     }
 
+    // -----------------------------
+    // ADDITIONAL FILTERS
+    // -----------------------------
+    
+    // Language Filter
     if (language) {
-      whereClauses.push(`d.dominant_language = $${paramIdx}`);
+      where.push(`d.dominant_language = $${idx}`);
       params.push(language);
-      paramIdx++;
+      idx++;
     }
 
+    // Persona Filter
     if (persona) {
-      whereClauses.push(`(d.personas->>$${paramIdx})::int > 0`);
-      orderByClause = `(d.personas->>$${paramIdx})::int DESC`; 
+      where.push(`(d.personas->>$${idx})::int > 0`);
       params.push(persona);
-      paramIdx++;
+      idx++;
     }
 
-    const whereSql = whereClauses.length > 0 ? 'WHERE ' + whereClauses.join(' AND ') : '';
+    // Specific Badge Type Filter (e.g. 'MVP', 'GDE')
+    if (badge) {
+      where.push(`
+        EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements(d.badges) AS b
+          WHERE LOWER(b->>'type') = LOWER($${idx})
+            OR LOWER(b->>'category') = LOWER($${idx})
+        )
+      `);
+      params.push(badge);
+      idx++;
+    }
+
+    const whereSQL = where.length ? "WHERE " + where.join(" AND ") : "";
 
     const query = `
       SELECT 
@@ -269,23 +268,24 @@ app.get("/api/developers", async (req, res) => {
               'language', t.language,
               'is_primary', t.is_primary
             ) ORDER BY t.stars_count DESC
-          ) FILTER (WHERE t.id IS NOT NULL), 
+          ) FILTER (WHERE t.id IS NOT NULL),
           '[]'
-        ) as top_repos
+        ) AS top_repos
       FROM developers d
       LEFT JOIN developer_top_repos t ON d.id = t.developer_id
-      ${whereSql}
+      ${whereSQL}
       GROUP BY d.id
-      ORDER BY ${orderByClause}
-      LIMIT $${paramIdx}
+      ORDER BY d.followers_count DESC
+      LIMIT $${idx};
     `;
 
     params.push(limit);
+
     const { rows } = await pool.query(query, params);
     res.json({ data: rows });
 
   } catch (err) {
-    console.error('Error fetching developers:', err);
+    console.error("Error fetching developers:", err);
     res.status(500).json({ error: "Failed to fetch developers" });
   }
 });
@@ -325,14 +325,11 @@ app.get("/api/developers/:login/details", async (req, res) => {
 
 // REPOSITORY ENDPOINTS (Unified)
 
-// Advanced Search & Filter
-// FIXED: Advanced Search & Filter endpoint with source filtering
 app.get("/api/repos/filter", async (req, res) => {
   try {
     const { q, language, topic, min_stars, sort_by, source } = req.query;
     const searchText = q ? `%${q}%` : null;
     
-    // Build WHERE clause components
     const whereClauses = [
       `($1::text IS NULL OR r.name ILIKE $1 OR r.description ILIKE $1)`,
       `($2::text IS NULL OR r.language = $2)`,
@@ -340,13 +337,10 @@ app.get("/api/repos/filter", async (req, res) => {
       `r.stars_count >= $4`
     ];
     
-    // CRITICAL FIX: Filter by source category if provided
     if (source) {
-      // Map source to category
       let category = 'top';
       if (source === 'growings') category = 'growing';
       if (source === 'trendings') category = 'trending';
-      
       whereClauses.push(`'${category}' = ANY(r.categories)`);
     }
     
@@ -382,10 +376,9 @@ app.get("/api/repos/filter", async (req, res) => {
   }
 });
 
-// List: Top Repos (Pagination)
 app.get("/api/repos/top", async (req, res) => {
   try {
-    const limit = Math.min(parseInt(req.query.limit as string) || 30, 300);
+    const limit = Math.min(parseInt(req.query.limit as string) || 30, 1000);
     const lastStars = req.query.lastStars ? parseInt(req.query.lastStars as string) : null;
     const lastId = req.query.lastId ? parseInt(req.query.lastId as string) : null;
 
@@ -424,7 +417,6 @@ app.get("/api/repos/top", async (req, res) => {
   }
 });
 
-// List: Growing Repos
 app.get('/api/growings-database', async (req, res) => {
   try {
     const queryText = `
@@ -436,7 +428,6 @@ app.get('/api/growings-database', async (req, res) => {
       LEFT JOIN repository_stats rs ON r.github_id = rs.repo_github_id
       WHERE 'growing' = ANY(r.categories)
       ORDER BY r.stars_count DESC, r.id DESC
-      LIMIT 100
     `;
     const { rows } = await pool.query(queryText);
     res.json({ data: rows });
@@ -446,7 +437,6 @@ app.get('/api/growings-database', async (req, res) => {
   }
 });
 
-// List: Trending Repos
 app.get('/api/trendings-database', async (req, res) => {
   try {
     const queryText = `
@@ -458,7 +448,6 @@ app.get('/api/trendings-database', async (req, res) => {
       LEFT JOIN repository_stats rs ON r.github_id = rs.repo_github_id
       WHERE 'trending' = ANY(r.categories)
       ORDER BY r.stars_count DESC, r.id DESC
-      LIMIT 100
     `;
     const { rows } = await pool.query(queryText);
     res.json({ data: rows });
@@ -468,7 +457,6 @@ app.get('/api/trendings-database', async (req, res) => {
   }
 });
 
-// Single Repo Search (ByName)
 app.get("/api/repos/search", async (req, res) => {
   try {
     const fullName = req.query.full_name as string;
@@ -533,22 +521,17 @@ app.get("/api/repos/:id/details", async (req, res) => {
   }
 });
 
-// Sub-resource: Contributors
 app.get("/api/repos/:id/contributors", async (req, res) => {
   try {
     const localId = parseInt(req.params.id);
-    
-    // 1. Resolve GitHub ID from repositories table
     const githubId = await getGithubIdFromLocal(localId);
     if (!githubId) return res.status(404).json({ error: "Repository not found" });
 
-    // 2. Query shared metrics
     const { rows } = await pool.query(
       `SELECT login, avatar_url, html_url, contributions, data_source
        FROM repository_contributors
        WHERE repo_github_id = $1
-       ORDER BY contributions DESC
-       LIMIT 30`,
+       ORDER BY contributions DESC `,
       [githubId]
     );
     res.json(rows);
@@ -558,11 +541,9 @@ app.get("/api/repos/:id/contributors", async (req, res) => {
   }
 });
 
-// Sub-resource: Commit Activity
 app.get("/api/repos/:id/commit-activity", async (req, res) => {
   try {
     const localId = parseInt(req.params.id);
-
     const githubId = await getGithubIdFromLocal(localId);
     if (!githubId) return res.status(404).json({ error: "Repository not found" });
 
@@ -580,12 +561,10 @@ app.get("/api/repos/:id/commit-activity", async (req, res) => {
   }
 });
 
-// Sub-resource: Recent Commits
 app.get("/api/repos/:id/commits", async (req, res) => {
   try {
     const localId = parseInt(req.params.id);
     const limit = Math.min(parseInt(req.query.limit as string) || 15, 50);
-    
     const githubId = await getGithubIdFromLocal(localId);
     if (!githubId) return res.status(404).json({ error: "Repository not found" });
 
@@ -607,7 +586,6 @@ app.get("/api/repos/:id/commits", async (req, res) => {
   }
 });
 
-// Stats: Global
 app.get('/api/stats', async (req, res) => {
   try {
     const { rows } = await pool.query(`
@@ -651,15 +629,11 @@ app.listen(port, () => {
   console.log(`\n🌐 Server running on http://localhost:${port}`);
 
   if (process.env.SYNC_DATA_ON_STARTUP === 'true') {
-    console.log("\nSYNC_DATA_ON_STARTUP is true. Checking if database is empty...");
     (async () => {
       try {
         const { rows } = await pool.query('SELECT COUNT(*) as count FROM repositories');
         if (parseInt(rows[0].count, 10) === 0) {
-          console.log("Database is empty, starting initial quick sync...");
           await githubService.syncQuick();
-        } else {
-          console.log("Database already contains data. Skipping startup sync.");
         }
       } catch (error) {
         console.error("❌ Error during startup sync check:", error);

@@ -44,6 +44,8 @@ CREATE TABLE repositories (
   language VARCHAR(100),
   topics TEXT[],
   license_name VARCHAR(255),
+  readme_snippet TEXT,
+
   
   -- Timestamps
   created_at TIMESTAMPTZ,
@@ -84,6 +86,8 @@ CREATE INDEX idx_repos_fullname ON repositories(full_name);
 CREATE INDEX idx_repos_stars ON repositories(stars_count DESC);
 CREATE INDEX idx_repos_categories ON repositories USING GIN (categories);
 CREATE INDEX idx_repos_sync_status ON repositories(sync_status);
+CREATE INDEX IF NOT EXISTS idx_repos_readme_search ON repositories USING GIN (to_tsvector('english', readme_snippet));
+
 
 
 -- =============================================================================
@@ -239,8 +243,10 @@ CREATE TABLE developers (
   primary_work JSONB DEFAULT '{}',
   
   -- Discovery Flags
+  is_hall_of_fame BOOLEAN DEFAULT FALSE,
+  is_trending_expert BOOLEAN DEFAULT FALSE,
+  is_badge_holder BOOLEAN DEFAULT FALSE,
   is_rising_star BOOLEAN DEFAULT FALSE,
-  scout_source VARCHAR(50) DEFAULT 'hall_of_fame',
   
   -- Behavioral Stats
   consistency_streak INTEGER DEFAULT 0,
@@ -255,7 +261,7 @@ CREATE TABLE developers (
   blog_url TEXT,
   twitter_username VARCHAR(255),
   
-  last_fetched TIMESTAMPTZ DEFAULT NOW()
+  last_fetched TIMESTAMPTZ DEFAULT NOW(),
 );
 
 -- 9. DEVELOPER TROPHY CASE (Top 3 Owned Repos)
@@ -284,3 +290,13 @@ CREATE INDEX idx_devs_source ON developers(scout_source);
 -- JSONB Indexes for High-Performance Querying on JSON columns
 CREATE INDEX idx_devs_current_work ON developers USING gin (current_work);
 CREATE INDEX idx_devs_primary_work ON developers USING gin (primary_work);
+
+-- =============================================================================
+-- MIGRATION: 4 Boolean Attributes
+-- =============================================================================
+
+-- 4. Create/Update Indexes for the new booleans
+CREATE INDEX IF NOT EXISTS idx_devs_hall_of_fame ON developers(is_hall_of_fame) WHERE is_hall_of_fame = TRUE;
+CREATE INDEX IF NOT EXISTS idx_devs_trending_expert ON developers(is_trending_expert) WHERE is_trending_expert = TRUE;
+CREATE INDEX IF NOT EXISTS idx_devs_badge_holder ON developers(is_badge_holder) WHERE is_badge_holder = TRUE;
+CREATE INDEX IF NOT EXISTS idx_devs_rising_star ON developers(is_rising_star) WHERE is_rising_star = TRUE;

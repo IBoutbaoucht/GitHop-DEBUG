@@ -190,14 +190,16 @@ class GitHubService {
     for (const repo of repos) {
       const topics = repo.repositoryTopics?.nodes?.map(t => t.topic.name) || [];
       
-      // ROBUST MAPPING: Handle both GraphQL (camelCase) and REST (snake_case) structures
-      // This fixes the "Missing Icon" issue.
       const avatarUrl = repo.owner.avatarUrl || (repo.owner as any).avatar_url;
       const login = repo.owner.login;
       const createdAt = repo.createdAt || (repo as any).created_at;
       const updatedAt = repo.updatedAt || (repo as any).updated_at;
       const pushedAt = repo.pushedAt || (repo as any).pushed_at;
       const license = repo.licenseInfo?.name || (repo as any).license?.name;
+
+      // --- NEW: Process README ---
+      const rawReadme = (repo as any).readme?.text || "";
+      const readmeSnippet = rawReadme.slice(0, 10000); // Truncate to 10k
 
       await client.query(
         `INSERT INTO repositories (
@@ -209,26 +211,27 @@ class GitHubService {
           is_fork, is_archived, is_disabled, allow_forking, is_template,
           visibility, has_issues, has_projects, has_downloads, has_wiki, has_pages, has_discussions,
           default_branch, subscribers_count, network_count,
-          last_fetched, categories, sync_status
+          last_fetched, categories, sync_status, readme_snippet
         ) VALUES (
           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
           $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34,
-          NOW(), ARRAY[$35], 'complete'
+          NOW(), ARRAY[$35], 'complete', $36
         )
         ON CONFLICT (github_id) DO UPDATE SET
           name = EXCLUDED.name,
           full_name = EXCLUDED.full_name,
           owner_login = EXCLUDED.owner_login,
-          owner_avatar_url = EXCLUDED.owner_avatar_url, -- IMPORTANT: Heal missing avatars
+          owner_avatar_url = EXCLUDED.owner_avatar_url,
           description = EXCLUDED.description,
           stars_count = EXCLUDED.stars_count,
           forks_count = EXCLUDED.forks_count,
           watchers_count = EXCLUDED.watchers_count,
           open_issues_count = EXCLUDED.open_issues_count,
-          created_at = EXCLUDED.created_at, -- IMPORTANT: Fix incorrect "created days ago" dates
+          created_at = EXCLUDED.created_at,
           updated_at = EXCLUDED.updated_at,
           pushed_at = EXCLUDED.pushed_at,
           topics = EXCLUDED.topics,
+          readme_snippet = EXCLUDED.readme_snippet, -- Update Readme
           categories = array_append(array_remove(repositories.categories, $35), $35),
           sync_status = 'complete',
           last_fetched = NOW()`,
@@ -267,7 +270,8 @@ class GitHubService {
           repo.defaultBranchRef?.name || (repo as any).default_branch || 'main', 
           repo.watchers?.totalCount || 0, 
           repo.forkCount,                 
-          category                        
+          category,
+          readmeSnippet // <--- $36
         ]
       );
 
@@ -407,6 +411,10 @@ class GitHubService {
             totalCount
             nodes { tagName, publishedAt }
           }
+          # NEW: Fetch Readme
+          readme: object(expression: "HEAD:README.md") {
+            ... on Blob { text }
+          }
         }
       }
     `;
@@ -428,8 +436,6 @@ class GitHubService {
         await this.sleep(300); 
       } catch (error) {
         console.warn(`⚠️ Enrichment skipped for ${repo.full_name}: REST fallback may be used.`);
-        // OPTIONAL: Push the original 'repo' to 'allRepos' if you want to save it anyway
-        // allRepos.push(repo); 
       }
     }
     return allRepos;
@@ -481,6 +487,10 @@ class GitHubService {
               releases(first: 1, orderBy: {field: CREATED_AT, direction: DESC}) {
                 totalCount
                 nodes { tagName, publishedAt }
+              }
+              # NEW: Fetch Readme
+              readme: object(expression: "HEAD:README.md") {
+                ... on Blob { text }
               }
             }
           }

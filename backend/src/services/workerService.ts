@@ -27,7 +27,6 @@ class WorkerService {
         SELECT id, github_id, full_name 
         FROM repositories 
         WHERE sync_status = 'stub' 
-        LIMIT 100
     `);
 
     if (rows.length === 0) {
@@ -52,6 +51,9 @@ class WorkerService {
   /**
    * Fetches FULL details via GraphQL and updates the main table + auxiliary tables
    */
+/**
+   * Fetches FULL details via GraphQL and updates the main table + auxiliary tables
+   */
   private async fetchAndEnrichRepo(githubId: string, fullName: string): Promise<void> {
       const [owner, name] = fullName.split('/');
       
@@ -68,7 +70,14 @@ class WorkerService {
             isFork, isArchived, isDisabled, forkingAllowed, isTemplate, visibility,
             hasIssuesEnabled, hasProjectsEnabled, hasWikiEnabled, hasDiscussionsEnabled,
             defaultBranchRef { name, target { ... on Commit { history(first: 1) { totalCount } } } },
-            releases(first: 1, orderBy: {field: CREATED_AT, direction: DESC}) { totalCount, nodes { tagName, publishedAt } }
+            releases(first: 1, orderBy: {field: CREATED_AT, direction: DESC}) { totalCount, nodes { tagName, publishedAt } },
+            
+            # --- NEW: Fetch README Content ---
+            readme: object(expression: "HEAD:README.md") {
+              ... on Blob {
+                text
+              }
+            }
           }
         }
       `;
@@ -77,7 +86,6 @@ class WorkerService {
       try {
         data = await this.graphqlClient.request(query, { owner, name });
       } catch (e) { 
-        // If repo is not found or private, we might want to mark it as 'failed' or delete
         console.error(`Error fetching GraphQL for ${fullName}`);
         return; 
       }
@@ -89,9 +97,16 @@ class WorkerService {
       try {
         await client.query('BEGIN');
 
-        // 1. Update the Master Table with FULL details
+        // 1. Prepare Data
         const topics = repo.repositoryTopics?.nodes?.map((t:any) => t.topic.name) || [];
         
+        // --- NEW: Process README ---
+        // We take the text, or empty string if null. 
+        // We truncate to 10,000 chars to save DB space but keep enough for search/display.
+        const rawReadme = repo.readme?.text || "";
+        const readmeSnippet = rawReadme.slice(0, 10000); 
+
+        // 2. Update the Master Table with FULL details (Added readme_snippet)
         await client.query(
           `UPDATE repositories SET
              name = $2, full_name = $3, owner_login = $4, owner_avatar_url = $5, description = $6,
@@ -101,6 +116,7 @@ class WorkerService {
              is_fork = $20, is_archived = $21, is_disabled = $22, allow_forking = $23, is_template = $24,
              visibility = $25, has_issues = $26, has_projects = $27, has_downloads = $28, has_wiki = $29,
              has_pages = $30, has_discussions = $31, default_branch = $32, 
+             readme_snippet = $33,  -- <--- NEW COLUMN
              last_fetched = NOW(), sync_status = 'complete'
            WHERE github_id = $1`,
           [
@@ -110,11 +126,12 @@ class WorkerService {
             repo.createdAt, repo.updatedAt, repo.pushedAt,
             repo.isFork, repo.isArchived, repo.isDisabled, repo.forkingAllowed, repo.isTemplate,
             repo.visibility, repo.hasIssuesEnabled, repo.hasProjectsEnabled, true, repo.hasWikiEnabled,
-            false, repo.hasDiscussionsEnabled, repo.defaultBranchRef?.name
+            false, repo.hasDiscussionsEnabled, repo.defaultBranchRef?.name,
+            readmeSnippet // <--- NEW PARAMETER ($33)
           ]
         );
 
-        // 2. Save Languages (Linked Table)
+        // 3. Save Languages (Linked Table)
         if (repo.languages?.edges) {
             await client.query('DELETE FROM repository_languages WHERE repo_github_id = $1', [githubId]);
             for (const lang of repo.languages.edges) {
@@ -127,12 +144,10 @@ class WorkerService {
             }
         }
 
-        // 3. Save Stats (Linked Table) - Initial Calculation
+        // 4. Save Stats (Linked Table)
         const commits = repo.defaultBranchRef?.target?.history?.totalCount || 0;
         const releases = repo.releases?.totalCount || 0;
         const latestRelease = repo.releases?.nodes?.[0];
-        
-        // Simple initial scores, will be updated by activity workers later
         const activityScore = Math.log10(commits + 1) * 20 + (releases * 5);
 
         await client.query(
@@ -148,6 +163,7 @@ class WorkerService {
         );
         
         await client.query('COMMIT');
+        console.log(`   ✓ Hydrated: ${fullName}`); // Optional log
       } catch (e) {
         await client.query('ROLLBACK');
         throw e;

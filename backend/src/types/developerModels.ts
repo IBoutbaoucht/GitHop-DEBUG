@@ -1,5 +1,6 @@
 export interface DeveloperBadge {
-  type: 'GDE' | 'MVP' | 'GitHub Star' | 'AWS Hero' | 'Big Tech Alumni' | 'Expert Vetted';
+  type: 'GDE' | 'MVP' | 'GitHub Star' | 'AWS Hero' | 'Big Tech Alumni' | 'Docker Captain' | 'CKA' | 'AWS Solutions Architect' | 'CISSP' | 'PSM' | 'CCIE';
+  // | 'Expert Vetted'
   category?: string;
   year?: number;
 }
@@ -72,7 +73,12 @@ export interface Developer {
   total_stars_earned: number;
   years_active: number;
   dominant_language?: string;
+  
+  // --- UPDATED CATEGORY FLAGS ---
   is_rising_star: boolean;
+  is_hall_of_fame: boolean;
+  is_trending_expert: boolean;
+  is_badge_holder: boolean;
   
   badges: DeveloperBadge[];
   personas: DeveloperPersonas;
@@ -80,7 +86,7 @@ export interface Developer {
   // New Fields
   current_work?: CurrentWorkStatus;
   primary_work?: PrimaryWorkStatus;
-  contributed_repos?: any[]; // Simplified for display
+  contributed_repos?: any[]; 
   
   company?: string;
   location?: string;
@@ -90,6 +96,7 @@ export interface Developer {
   created_at: string;
   last_fetched: string;
 }
+
 
 
 // Add this to developerWorkerService.ts - New language analysis function

@@ -1,5 +1,3 @@
-"use client"
-
 import { useState, useEffect } from "react"
 import { useParams, useNavigate, useSearchParams } from "react-router-dom"
 import {
@@ -41,6 +39,7 @@ import {
   YAxis,
   ResponsiveContainer,
 } from "recharts"
+import ReadmeViewer from "./components/ReadmeViewer" // Add this import
 
 // --- Interfaces ---
 
@@ -81,6 +80,7 @@ interface Repository {
   commits_last_year?: number;
   latest_release_tag?: string;
   total_releases?: number;
+  readme_snippet?: string; // Add this field
 }
 
 interface RepositoryLanguage {
@@ -477,6 +477,8 @@ function RepositoryDetail() {
           {/* LEFT COLUMN: Community & Code */}
           <div className="lg:col-span-2 space-y-8">
             
+            <ReadmeViewer content={repo.readme_snippet} repoName={repo.name} />
+
             {/* 1. CONTRIBUTORS */}
             {repo.contributors && repo.contributors.length > 0 && (
               <div className="bg-gray-900/40 backdrop-blur-md rounded-2xl border border-white/5 p-8 relative overflow-hidden">

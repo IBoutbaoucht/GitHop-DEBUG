@@ -39,6 +39,8 @@ export interface Repository {
   last_fetched: string;
   categories: string[]; // <--- NEW
   sync_status: 'stub' | 'complete'; // <--- NEW
+  readme_snippet?: string; // <--- NEW FIELD
+
 }
 
 export interface RepositoryStats {

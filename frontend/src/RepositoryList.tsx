@@ -325,7 +325,7 @@ function RepositoryList() {
 
   const fetchRepos = async (type: NavigationView) => {
     let url = '';
-    if (type === 'top-repos') url = `${API_BASE}/repos/top?limit=300`;
+    if (type === 'top-repos') url = `${API_BASE}/repos/top?limit=1000`;
     if (type === 'growing-repos') url = `${API_BASE}/growings-database`;
     if (type === 'trending-repos') url = `${API_BASE}/trendings-database`;
 
