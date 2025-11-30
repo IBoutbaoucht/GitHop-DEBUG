@@ -57,7 +57,7 @@ async function getGithubIdFromLocal(localId: number): Promise<string | null> {
 }
 
 // Test Endpoint
-app.post('/test' , async (req, res) => {
+app.get('/test' , async (req, res) => {
    res.status(202).json({ message: "Test trigger received." });
 })
 

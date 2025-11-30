@@ -104,7 +104,7 @@ CREATE TABLE repository_stats (
   pull_requests_merged_last_month INTEGER DEFAULT 0,
   stars_growth_30d INTEGER DEFAULT 0,
   stars_growth_7d INTEGER DEFAULT 0,
-  stars_growth_90d INTEGER DEFAULT 0;
+  stars_growth_90d INTEGER DEFAULT 0,
   forks_growth_30d INTEGER DEFAULT 0,
   contributors_count INTEGER DEFAULT 0,
   
@@ -266,7 +266,7 @@ CREATE TABLE developers (
   blog_url TEXT,
   twitter_username VARCHAR(255),
   
-  last_fetched TIMESTAMPTZ DEFAULT NOW(),
+  last_fetched TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- 9. DEVELOPER TROPHY CASE (Top 3 Owned Repos)
@@ -290,7 +290,6 @@ CREATE INDEX idx_devs_impact ON developers(total_stars_earned DESC);
 CREATE INDEX idx_devs_followers ON developers(followers_count DESC);
 CREATE INDEX idx_devs_personas ON developers USING gin (personas);
 CREATE INDEX idx_devs_is_org ON developers(is_organization);
-CREATE INDEX idx_devs_source ON developers(scout_source);
 
 -- JSONB Indexes for High-Performance Querying on JSON columns
 CREATE INDEX idx_devs_current_work ON developers USING gin (current_work);
