@@ -12,7 +12,7 @@ interface Quote {
 
 interface GridItem {
   title: string;
-  icon: string; // Now refers to an SVG key, not an emoji
+  icon: string; // SVG key
   description: string;
 }
 
@@ -32,7 +32,6 @@ interface SlideData {
   tableRows?: string[][];
   gridItems?: GridItem[];
   theme?: 'analysis' | 'architecture';
-  // Specific for Split View (Problem/Solution)
   leftContent?: { title: string; text: string };
   rightContent?: { title: string; text: string };
 }
@@ -40,28 +39,22 @@ interface SlideData {
 // --- DATA ---
 const slides: SlideData[] = [
   // ==========================================
-  // PHASE 1: INTRODUCTION & ANALYSIS (Cyan/Blue Theme)
+  // PHASE 1: ANALYSIS & REQUIREMENTS (12 Slides - Cyan/Blue Theme)
   // ==========================================
-  
-  // SLIDE 1: TITLE
   {
     type: 'title',
     title: 'GitHop',
-    subtitle: 'Software Engineering Project',
-    developers: ['IMAD BOUTBAOUCHT', 'ILIAS SKIRIBA'],
-    content: 'Fall 2025',
+    subtitle: 'From Requirements to Reality',
+    developers: ['Imad BOUTBAOUCHT', 'Ilias SKIRIBA'],
+    content: 'Project Analysis & Implementation Review • Oct 2025',
     theme: 'analysis'
   },
-
-  // SLIDE 2: DEFINITION
   {
     type: 'simple',
     title: 'What is GitHop?',
     content: 'GitHop is a social intelligence engine for Open Source. It aggregates scattered GitHub activity into a curated, algorithmic feed—transforming raw data into meaningful developer personas and trending insights.',
     theme: 'analysis'
   },
-
-  // SLIDE 3: MOTIVATION (Problem vs Solution)
   {
     type: 'split',
     title: 'Project Motivation',
@@ -69,15 +62,13 @@ const slides: SlideData[] = [
     theme: 'analysis',
     leftContent: {
       title: 'The Problem',
-      text: 'Developers suffer from information overload. GitHub Trending is superficial, lacking semantic filtering. Identifying active peers or finding specific stacks requires manual, time-consuming excavation of repositories.'
+      text: 'Developers suffer from information overload. GitHub Trending is superficial, lacking semantic filtering. Identifying active peers or finding specific stacks requires manual, time-consuming excavation.'
     },
     rightContent: {
       title: 'The Solution',
       text: 'A unified "Social Feed" for code. We implemented a system that aggregates Repositories, Developers, and Topics, powered by Vector Search (AI) and automated background workers to curate quality over quantity.'
     }
   },
-
-  // SLIDE 4: MARKET VALIDATION
   {
     type: 'grid',
     title: 'Market Validation',
@@ -90,8 +81,6 @@ const slides: SlideData[] = [
       { title: 'Verdict', icon: 'check', description: 'Greenlit. Vision validated by user research.' }
     ]
   },
-
-  // SLIDE 5: FR - DATA AGGREGATION
   {
     type: 'table',
     title: 'FR: Data Aggregation',
@@ -104,8 +93,6 @@ const slides: SlideData[] = [
       ['FR-1.3', 'Handle Rate Limiting', 'PASSED', 'Sleep/Retry logic in commitWorker.ts']
     ]
   },
-
-  // SLIDE 6: REPO INTELLIGENCE
   {
     type: 'table',
     title: 'FR: Repo Intelligence',
@@ -118,8 +105,6 @@ const slides: SlideData[] = [
       ['FR-X', 'README Analysis', 'PASSED', 'readmeWorkerService.ts fetches context']
     ]
   },
-
-  // SLIDE 7: DEV INTELLIGENCE
   {
     type: 'table',
     title: 'FR: Dev Intelligence',
@@ -132,8 +117,6 @@ const slides: SlideData[] = [
       ['FR-5.2', 'Auto-Tagging', 'PASSED', 'Badges (GDE, MVP) assigned via Bio']
     ]
   },
-
-  // SLIDE 8: SMART SEARCH
   {
     type: 'code',
     title: 'Advanced Features',
@@ -155,8 +138,6 @@ const intent = await gemini.parse(query);
 const embeddings = await embed(query);
 const results = await db.vectorQuery(embeddings, intent);`
   },
-
-  // SLIDE 9: NFRs
   {
     type: 'table',
     title: 'Non-Functional Reqs',
@@ -170,8 +151,6 @@ const results = await db.vectorQuery(embeddings, intent);`
       ['Security', 'Secure Creds', 'PASSED', 'dotenv & gitignore used']
     ]
   },
-
-  // SLIDE 10: TECH FEASIBILITY
   {
     type: 'grid',
     title: 'Tech Feasibility',
@@ -184,19 +163,35 @@ const results = await db.vectorQuery(embeddings, intent);`
       { title: 'Verdict', icon: 'shield', description: 'Architecture Exceeded Expectations.' }
     ]
   },
+  {
+    type: 'list',
+    title: 'Schedule & Process',
+    subtitle: 'Timeline: 6 Weeks',
+    theme: 'analysis',
+    items: [
+      '<b>Foundation:</b> Setup DB & CI/CD ✅',
+      '<b>Data Arch:</b> Designed Repo/Dev Schemas ✅',
+      '<b>Backend Core:</b> Implemented Workers & Services ✅',
+      '<b>Risk Mitigation:</b> Implemented "Stub Hydration" to bypass API Rate Limits ✅'
+    ]
+  },
+  {
+    type: 'simple',
+    title: 'Analysis Conclusion',
+    content: '100% of Critical Requirements Met. Ready for Technical Deep Dive.',
+    theme: 'analysis'
+  },
 
   // ==========================================
-  // PHASE 2: ARCHITECTURE (Purple/Pink Theme)
+  // PHASE 2: ARCHITECTURE & TESTING (13 Slides - Purple/Pink Theme)
   // ==========================================
-  
   {
     type: 'simple',
     title: 'Technical Architecture',
-    content: 'Reviewing the structural Design Patterns that ensure modularity and scalability.',
+    content: 'Exploring the Design Patterns and Testing Strategy behind the requirements.',
     theme: 'architecture'
   },
-
-  // SINGLETON
+  // DESIGN PATTERNS (8 SLIDES)
   {
     type: 'code',
     title: 'Singleton Pattern',
@@ -218,8 +213,6 @@ const pool = new Pool({
 // The single instance export
 export default pool;`
   },
-
-  // STRATEGY
   {
     type: 'code',
     title: 'Strategy Pattern',
@@ -241,8 +234,6 @@ public async runJobs(strategy: 'FULL' | 'QUICK') {
     }
 }`
   },
-
-  // ADAPTER
   {
     type: 'code',
     title: 'Adapter Pattern',
@@ -263,8 +254,6 @@ const adapter = (bqRow: any): Repo => ({
     updated_at: new Date()
 });`
   },
-
-  // OBSERVER
   {
     type: 'code',
     title: 'Observer Pattern',
@@ -287,8 +276,93 @@ pool.on('error', (err) => {
   console.error("❌ Unexpected Error", err);
 });`
   },
+  // --- MISSING PATTERNS RE-INSERTED ---
+  {
+    type: 'code',
+    title: 'Chain of Responsibility',
+    language: 'typescript',
+    theme: 'architecture',
+    description: [
+      'Type: Behavioral',
+      'Passes requests along a chain of handlers.',
+      'AI Fallback Logic: Tries Cheap Model (Flash) -> Fails -> Tries Strong Model (Pro).'
+    ],
+    code: `try {
+    // Link 1: Fast Model
+    return await askGeminiFlash(prompt);
+} catch (e) {
+    console.warn("Flash failed, escalating...");
+    // Link 2: Strong Model
+    return await askGeminiPro(prompt);
+}`
+  },
+  {
+    type: 'code',
+    title: 'Builder Pattern',
+    language: 'typescript',
+    theme: 'architecture',
+    description: [
+      'Type: Creational',
+      'Constructs complex objects step-by-step.',
+      'Used to build dynamic SQL queries for the Smart Search.'
+    ],
+    code: `// Start with base
+let query = new QueryBuilder('repos');
 
-  // UNIT TEST
+// Step-by-step construction
+if (filter.lang) query.where('language', filter.lang);
+if (filter.stars) query.where('stars', '>', filter.stars);
+
+// Finalize
+const sql = query.build();`
+  },
+  {
+    type: 'code',
+    title: 'Template Method',
+    language: 'typescript',
+    theme: 'architecture',
+    description: [
+      'Type: Behavioral',
+      'Defines the skeleton of an algorithm.',
+      'Standardizes how we sync Weekly vs Monthly trends.'
+    ],
+    code: `abstract class TrendSync {
+    // The Template (Fixed steps)
+    async sync() {
+        const data = await this.fetchData(); // Abstract
+        await this.save(data); // Concrete
+    }
+}
+
+class WeeklySync extends TrendSync {
+    fetchData() { return ghArchive.getDays(7); }
+}`
+  },
+  {
+    type: 'code',
+    title: 'Facade Pattern',
+    language: 'typescript',
+    theme: 'architecture',
+    description: [
+      'Type: Structural',
+      'Hides complexity behind a simple interface.',
+      'The WorkerService wraps complex background job logic.'
+    ],
+    code: `// Complex Subsystems:
+// - RedisQueue
+// - GitHubAPI
+// - DB Update Logic
+
+// Facade:
+export class WorkerFacade {
+    static async startAll() {
+        // Orchestrates all subsystems effortlessly
+        await queue.clean();
+        await api.hydrate();
+    }
+}`
+  },
+  // TESTING SLIDES (3 SLIDES)
   {
     type: 'code',
     title: 'Unit Testing',
@@ -296,6 +370,7 @@ pool.on('error', (err) => {
     language: 'typescript',
     theme: 'architecture',
     description: [
+        'Method: White-Box Testing (Internal Logic Known)',
         'Target: Developer Persona Engine',
         'Goal: Verify logic isolation.'
     ],
@@ -314,15 +389,14 @@ pool.on('error', (err) => {
  ✓ classifies AI Whisperer (4ms)
 */`
   },
-
-  // BOUNDARY VALUE
   {
     type: 'code',
-    title: 'Boundary Value',
+    title: 'Boundary Value Analysis',
     subtitle: 'Edge Case Validation',
     language: 'typescript',
     theme: 'architecture',
     description: [
+        'Method: Boundary Testing',
         'Target: Scoring Algorithm',
         'Goal: Handle 0 inputs (New Repo).'
     ],
@@ -340,7 +414,18 @@ pool.on('error', (err) => {
  ✓ Handles Zero-State Repo (2ms)
 */`
   },
-
+  {
+    type: 'table',
+    title: 'Test Case Artifacts',
+    subtitle: 'Black-Box Testing',
+    theme: 'architecture',
+    tableHeaders: ['ID', 'Input', 'Expected', 'Actual', 'Status'],
+    tableRows: [
+        ['TC-01', '"React Twitter Clone"', 'List of React Repos', '5 Results Found', 'PASS ✅'],
+        ['TC-02', '"" (Empty String)', 'Error 400', 'Error 400', 'PASS ✅'],
+        ['TC-03', '"Cobol Mainframe"', 'Empty List []', 'Empty List []', 'PASS ✅']
+    ]
+  },
   // SUMMARY
   {
     type: 'simple',
@@ -425,8 +510,15 @@ function Slides() {
       if (e.key === 'ArrowLeft') prevSlide();
       if (e.key.toLowerCase() === 'f') toggleFullscreen();
     };
+    const onFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
     window.addEventListener('keydown', handleKeydown);
-    return () => window.removeEventListener('keydown', handleKeydown);
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    return () => {
+      window.removeEventListener('keydown', handleKeydown);
+      document.removeEventListener('fullscreenchange', onFullscreenChange);
+    };
   }, [currentSlideIndex]);
 
   // --- THEME COLORS ---
@@ -467,18 +559,10 @@ function Slides() {
           to { opacity: 1; transform: translateY(0); }
         }
         .animate-enter { animation: fadeIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-        
-        /* Tech Overlay Lines */
-        .tech-line {
-            position: absolute;
-            background: rgba(255,255,255,0.03);
-            z-index: 0;
-        }
       `}</style>
 
       <div className="w-full h-full min-h-screen flex items-center justify-center bg-[#0B0C15] p-4 font-sans text-gray-300 relative overflow-hidden bg-grid-pattern">
         
-        {/* AMBIENT BACKGROUND */}
         <div className={`absolute top-[-20%] left-[-10%] w-[60vw] h-[60vw] rounded-full blur-[150px] pointer-events-none transition-colors duration-1000 ${ambientBg}`}></div>
         <div className={`absolute bottom-[-20%] right-[-10%] w-[60vw] h-[60vw] rounded-full blur-[150px] pointer-events-none transition-colors duration-1000 ${ambientBg}`}></div>
 
@@ -514,7 +598,7 @@ function Slides() {
                     System Initialization
                   </div>
 
-                  <h1 className={`font-black tracking-tighter mb-4 bg-gradient-to-r ${accentGradient} bg-clip-text text-transparent bg-[length:200%_auto] animate-[pulse_6s_infinite] ${
+                  <h1 className={`font-black tracking-tighter mb-4 bg-gradient-to-r ${accentGradient} bg-clip-text text-transparent bg-[length:200%_auto] ${
                     isFullscreen ? 'text-9xl' : 'text-8xl'
                   }`}>
                     {currentSlide.title}
@@ -540,10 +624,9 @@ function Slides() {
                 </div>
               )}
 
-              {/* --- 2. SIMPLE SLIDE (DEFINITION) --- */}
+              {/* --- 2. SIMPLE SLIDE (DEFINITION/CONCLUSION) --- */}
               {currentSlide.type === 'simple' && (
                  <div className="h-full flex flex-col justify-center items-center text-center px-12 relative">
-                    {/* Background Graphic */}
                     <div className={`absolute w-[600px] h-[600px] border border-white/5 rounded-full animate-[spin_60s_linear_infinite] pointer-events-none`}></div>
                     <div className={`absolute w-[400px] h-[400px] border border-white/5 rounded-full animate-[spin_40s_linear_infinite_reverse] pointer-events-none`}></div>
 
@@ -570,7 +653,7 @@ function Slides() {
 
                   <div className="flex-1 grid grid-cols-2 gap-12 items-center">
                       {/* Left: Problem */}
-                      <div className="bg-red-500/5 border border-red-500/20 p-8 rounded-xl h-full flex flex-col relative overflow-hidden group hover:border-red-500/40 transition-colors">
+                      <div className="bg-red-500/5 border border-red-500/20 p-8 rounded-xl h-full flex flex-col relative group hover:border-red-500/40 transition-colors">
                           <div className="absolute top-0 right-0 p-4 opacity-10 text-9xl font-black text-red-500 pointer-events-none">!</div>
                           <h3 className="text-2xl font-bold text-red-400 mb-6 uppercase tracking-wider flex items-center gap-2">
                              <div className="w-2 h-2 bg-red-500 rounded-full"></div> {currentSlide.leftContent?.title}
@@ -581,8 +664,8 @@ function Slides() {
                       </div>
 
                       {/* Right: Solution */}
-                      <div className={`bg-cyan-500/5 border ${isAnalysis ? 'border-cyan-500/20' : 'border-purple-500/20'} p-8 rounded-xl h-full flex flex-col relative overflow-hidden group hover:border-opacity-50 transition-colors`}>
-                          <div className={`absolute top-0 right-0 p-4 opacity-10 text-9xl font-black pointer-events-none ${isAnalysis ? 'text-cyan-500' : 'text-purple-500'}`}>✓</div>
+                      <div className={`bg-cyan-500/5 border ${accentBorder} p-8 rounded-xl h-full flex flex-col relative group hover:border-opacity-50 transition-colors`}>
+                          <div className={`absolute top-0 right-0 p-4 opacity-10 text-9xl font-black pointer-events-none ${accentText}`}>{isAnalysis ? '✓' : '✧'}</div>
                           <h3 className={`text-2xl font-bold mb-6 uppercase tracking-wider flex items-center gap-2 ${accentText}`}>
                              <div className={`w-2 h-2 rounded-full ${isAnalysis ? 'bg-cyan-500' : 'bg-purple-500'}`}></div> {currentSlide.rightContent?.title}
                           </h3>
@@ -612,7 +695,7 @@ function Slides() {
                            </div>
                            <div>
                               <h3 className="text-lg font-bold text-white mb-2 uppercase tracking-wide">{item.title}</h3>
-                              <p className="text-gray-400 leading-relaxed text-sm">{item.description}</p>
+                              <p className="text-gray-400 leading-relaxed text-sm whitespace-pre-line">{item.description}</p>
                            </div>
                         </div>
                      ))}
@@ -664,7 +747,6 @@ function Slides() {
                       </div>
 
                       <div className="md:w-2/3 flex flex-col rounded border border-white/10 bg-[#0d0e12] shadow-2xl relative">
-                         {/* Fake Terminal Header */}
                          <div className="bg-white/5 px-4 py-2 flex items-center gap-2 border-b border-white/5">
                             <div className="w-2 h-2 rounded-full bg-red-500/50"></div>
                             <div className="w-2 h-2 rounded-full bg-yellow-500/50"></div>
