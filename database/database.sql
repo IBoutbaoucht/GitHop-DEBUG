@@ -88,8 +88,6 @@ CREATE INDEX idx_repos_categories ON repositories USING GIN (categories);
 CREATE INDEX idx_repos_sync_status ON repositories(sync_status);
 CREATE INDEX IF NOT EXISTS idx_repos_readme_search ON repositories USING GIN (to_tsvector('english', readme_snippet));
 
-
-
 -- =============================================================================
 -- MODULE 2: REPOSITORY SUB-DATA (Linked by repo_github_id)
 -- =============================================================================
@@ -105,6 +103,8 @@ CREATE TABLE repository_stats (
   issues_closed_last_month INTEGER DEFAULT 0,
   pull_requests_merged_last_month INTEGER DEFAULT 0,
   stars_growth_30d INTEGER DEFAULT 0,
+  stars_growth_7d INTEGER DEFAULT 0,
+  stars_growth_90d INTEGER DEFAULT 0;
   forks_growth_30d INTEGER DEFAULT 0,
   contributors_count INTEGER DEFAULT 0,
   
@@ -130,6 +130,11 @@ CREATE TABLE repository_stats (
   
   calculated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Index for fast sorting
+CREATE INDEX IF NOT EXISTS idx_stats_growth_7d ON repository_stats(stars_growth_7d DESC);
+CREATE INDEX IF NOT EXISTS idx_stats_growth_30d ON repository_stats(stars_growth_30d DESC);
+CREATE INDEX IF NOT EXISTS idx_stats_growth_90d ON repository_stats(stars_growth_90d DESC);
 
 -- 4. LANGUAGES
 CREATE TABLE repository_languages (
@@ -300,3 +305,23 @@ CREATE INDEX IF NOT EXISTS idx_devs_hall_of_fame ON developers(is_hall_of_fame) 
 CREATE INDEX IF NOT EXISTS idx_devs_trending_expert ON developers(is_trending_expert) WHERE is_trending_expert = TRUE;
 CREATE INDEX IF NOT EXISTS idx_devs_badge_holder ON developers(is_badge_holder) WHERE is_badge_holder = TRUE;
 CREATE INDEX IF NOT EXISTS idx_devs_rising_star ON developers(is_rising_star) WHERE is_rising_star = TRUE;
+
+
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+CREATE INDEX idx_devs_search_trgm ON developers USING gin (
+  (login || ' ' || COALESCE(name, '') || ' ' || COALESCE(bio, '')) gin_trgm_ops
+);
+
+
+-- 1. Enable the vector extension (This will now succeed!)
+CREATE EXTENSION IF NOT EXISTS vector;
+
+-- 2. Add the embedding column
+-- We use 1536 dimensions (Standard for OpenAI text-embedding-3-small)
+-- If you switch to Gemini Embeddings later, you might need 768.
+ALTER TABLE repositories ADD COLUMN IF NOT EXISTS embedding vector(1536);
+
+-- 3. Create the HNSW Index
+-- This makes searching 60k rows lightning fast.
+CREATE INDEX ON repositories USING hnsw (embedding vector_cosine_ops);

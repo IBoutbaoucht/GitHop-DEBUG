@@ -45,7 +45,7 @@ class GitHubService {
     const newHotRepos = await fetch(
       `https://api.github.com/search/repositories?` +
       `q=created:>${oneMonthAgo} stars:>100&` +
-      `sort=stars&order=desc&per_page=50`,
+      `sort=stars&order=desc&per_page=100`,
       { headers: { 'Authorization': `token ${process.env.GITHUB_TOKEN}` }}
     ).then(r => r.json());
     
@@ -104,7 +104,7 @@ class GitHubService {
   // 3. CORE LOGIC: DETAILS & SAVING
   // ===========================================================================
 
-  private async fetchDetailsAndSave(rawRepos: any[], category: 'growing' | 'trending'): Promise<void> {
+  public async fetchDetailsAndSave(rawRepos: any[], category: 'growing' | 'trending' | 'trending_weekly' | 'trending_monthly' | 'trending_quarterly' ): Promise<void> {
     // Enrich raw REST data with GraphQL details to get topics, precise counts, etc.
     const detailedRepos = await this.enrichWithGraphQL(rawRepos);
     const validRepos: GitHubRepo[] = detailedRepos.filter(

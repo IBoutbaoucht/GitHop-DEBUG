@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { FileText, ChevronDown, ChevronUp, BookOpen, AlertTriangle } from 'lucide-react';
+import { FileText, ChevronDown, ChevronUp, BookOpen, AlertTriangle, ExternalLink } from 'lucide-react';
 
 interface ReadmeViewerProps {
   content?: string;
@@ -11,59 +11,111 @@ const SimpleMarkdown = ({ text, repoFullName }: { text: string; repoFullName?: s
   if (!text) return null;
 
   // Use 'main' as the default branch if the repo is present
-  const GITHUB_RAW_URL = `https://raw.githubusercontent.com/${repoFullName}/main/`;
-
-  // Combined Regex for inline tokens (Images, Links, Bold, Code).
-  // We use non-capturing groups (?:...) where possible, and ensure the split is clean.
-  // The split() method includes the capturing groups in the result array, so we must rely on
-  // the start of the string to identify the token type reliably.
-  const INLINE_TOKEN_REGEX = /(\!\[.*?\]\s*\([^\)]+\)|\[.*?\]\s*\([^\)]+\)|\*\*.*?\*\*|`.*?`)/g;
-
+  // Fallback to empty string if undefined to prevent https://github.com/undefined
+  const safeRepoName = repoFullName || '';
+  const GITHUB_RAW_URL = `https://raw.githubusercontent.com/${safeRepoName}/main/`;
 
   // Helper for basic inline formatting (Bold, Code, Link, Image)
   const parseInline = (line: string, keyPrefix: string) => {
-    // Split the line by the regex, capturing the matched tokens (Images, Links, Bold, Code)
-    const parts = line.split(INLINE_TOKEN_REGEX).filter(p => p !== '');
+    // 1. COMPLEX REGEX:
+    // Group 1: Linked Images [![alt](img)](url)  <-- We want to SHOW these
+    // Group 2: Standalone Images ![alt](img)     <-- We want to SHOW these
+    // Group 3: Regular Links [text](url)          <-- We want to SHOW these
+    // Group 4: Bold **text**
+    // Group 5: Code `text`
+    const regex = /(!?\[.*?\]\(.*?\)|\[!\[.*?\]\(.*?\)\]\(.*?\))|(\*\*.*?\*\*)|(`.*?`)/g;
+    
+    // Split and filter empty strings
+    const parts = line.split(regex).filter(p => p !== undefined && p !== '');
     
     return parts.map((part, index) => {
-      // CRITICAL FIX: Add check for undefined/null part content
-      if (!part) return null;
-      
-      const key = `${keyPrefix}-inline-${index}`;
+      const key = `${keyPrefix}-part-${index}`;
 
-      // 1. Image (Detects ![]() )
-      if (part.startsWith('![')) {
-        // User requested to hide images completely
-        return null;
+      // A. Check for Linked Image: [![alt](src)](url)
+      if (part.startsWith('[![') && part.includes('](') && part.endsWith(')')) {
+         const match = part.match(/\[!\[(.*?)\]\((.*?)\)\]\((.*?)\)/);
+         if (match) {
+            const [, alt, imgSrc, linkUrl] = match;
+            let finalImgSrc = imgSrc.trim();
+            if (safeRepoName && !finalImgSrc.startsWith('http')) {
+               finalImgSrc = `${GITHUB_RAW_URL}${finalImgSrc.replace(/^\//, '')}`;
+            }
+            return (
+               <a key={key} href={linkUrl} target="_blank" rel="noopener noreferrer" className="inline-block my-2">
+                  <img 
+                    src={finalImgSrc} 
+                    alt={alt} 
+                    className="max-w-full h-auto rounded-lg shadow-sm border border-gray-700/50 hover:opacity-90 transition-opacity" 
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                  />
+               </a>
+            );
+         }
       }
 
-      // 2. Link (Detects []() )
-      if (part.startsWith('[')) {
-        const match = part.match(/\[(.*?)\]\s*\(([^\)]+)\)/); // Match: [label](url)
-        if (match) {
-           const [, label, url] = match;
-           
-           // SECURITY FIX: Prevent rendering malicious external scripts/iframes
-           if (url.toLowerCase().startsWith('javascript:')) {
-              return <span key={key} className="text-red-400">**UNSAFE LINK REMOVED**</span>;
+      // B. Check for Standalone Image: ![alt](src)
+      if (part.startsWith('![') && part.includes('](') && part.endsWith(')')) {
+         const match = part.match(/!\[(.*?)\]\((.*?)\)/);
+         if (match) {
+           const [, alt, rawSrc] = match;
+           let src = rawSrc.trim();
+
+           // Handle relative paths for images
+           if (safeRepoName && !src.startsWith('http')) {
+             src = `${GITHUB_RAW_URL}${src.replace(/^\//, '')}`;
            }
 
-           return <a key={key} href={url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">{label}</a>;
-        }
-      }
-      
-      // 3. Bold
-      if (part.startsWith('**') && part.endsWith('**')) {
-        return <strong key={key} className="text-white font-bold">{part.slice(2, -2)}</strong>;
-      }
-      
-      // 4. Inline Code
-      if (part.startsWith('`') && part.endsWith('`')) {
-        return <code key={key} className="bg-[#161b22] text-purple-300 px-1.5 py-0.5 rounded text-sm font-mono">{part.slice(1, -1)}</code>;
+           return (
+             <img 
+               key={key} 
+               src={src} 
+               alt={alt || "Markdown Image"} 
+               className="max-w-full h-auto rounded-xl shadow-lg my-4 border border-gray-700/50" 
+               onError={(e) => {
+                 const target = e.target as HTMLImageElement;
+                 target.style.display = 'none'; // Hide if fails to load
+               }}
+             />
+           );
+         }
       }
 
-      return part; // Return regular text
+      // C. Process remaining text (Links, Bold, Code, Plain)
+      return parseTextContent(part, key);
     });
+  };
+
+  // Helper to parse non-image text for Links, Bold, Code
+  const parseTextContent = (text: string, baseKey: string) => {
+    // Check for standard Link: [Label](Url)
+    if (text.startsWith('[') && text.includes('](') && text.endsWith(')')) {
+        const match = text.match(/\[(.*?)\]\((.*?)\)/);
+        if (match) {
+          const [, label, url] = match;
+          
+          // Double-check: If label looks like an image markdown, ignore it (handled above)
+          if (label.startsWith('![')) return null;
+
+          // Security check
+          if (url.toLowerCase().startsWith('javascript:')) {
+              return <span key={baseKey} className="text-red-400">**UNSAFE LINK**</span>;
+          }
+          return <a key={baseKey} href={url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">{label}</a>;
+        }
+    }
+
+    // Check for Bold: **text**
+    if (text.startsWith('**') && text.endsWith('**')) {
+      return <strong key={baseKey} className="text-white font-bold">{text.slice(2, -2)}</strong>;
+    }
+
+    // Check for Code: `text`
+    if (text.startsWith('`') && text.endsWith('`')) {
+      return <code key={baseKey} className="bg-[#161b22] text-purple-300 px-1.5 py-0.5 rounded text-sm font-mono">{text.slice(1, -1)}</code>;
+    }
+
+    // Plain Text
+    return <span key={baseKey}>{text}</span>;
   };
 
   const elements = [];
@@ -144,9 +196,8 @@ const SimpleMarkdown = ({ text, repoFullName }: { text: string; repoFullName?: s
     if (!line.trim()) continue;
     
     // 6. Handle Paragraphs & Inline elements (like images/links/bold text)
-    const processedLine = parseInline(line, `p-${i}`);
-
-    elements.push(<p key={`p-${i}`} className="text-gray-300 leading-relaxed mb-4">{processedLine}</p>);
+    // We wrap inline parsing in a fragment or array to allow null returns (hidden images)
+    elements.push(<p key={`p-${i}`} className="text-gray-300 leading-relaxed mb-4">{parseInline(line, `p-${i}`)}</p>);
   }
 
   // Flush remaining list
@@ -172,6 +223,8 @@ export default function ReadmeViewer({ content, repoFullName }: ReadmeViewerProp
   // We look for external URLs that are not hosted by GitHub itself
   const hasExternalContent = content.match(/<img[^>]+src=["'](https?:\/\/(?!raw\.githubusercontent\.com|user-images\.githubusercontent\.com|placehold\.co)[^"']+)["']/i) || content.match(/<iframe|<script/i);
 
+  // Check if content is truncated (backend limit is 10000 chars)
+  const isTruncated = content.length >= 10000;
 
   return (
     <div className="mt-8 group animate-in fade-in slide-in-from-bottom-4 duration-700">
@@ -207,6 +260,23 @@ export default function ReadmeViewer({ content, repoFullName }: ReadmeViewerProp
       }`}>
         <div className="px-6 py-8 sm:px-8 sm:py-10 text-sm">
            <SimpleMarkdown text={content} repoFullName={repoFullName} />
+           
+           {/* TRUNCATED CONTENT MESSAGE */}
+           <div className="mt-8 pt-6 border-t border-white/10 text-center">
+              {isTruncated && <p className="text-gray-400 mb-2">... content truncated for performance ...</p>}
+              
+              {/* Corrected Link Handling */}
+              {repoFullName && (
+                <a 
+                  href={`https://github.com/${repoFullName}#readme`} 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 text-purple-400 hover:text-purple-300 font-bold hover:underline"
+                >
+                  Read full documentation on GitHub <ExternalLink className="w-3 h-3" />
+                </a>
+              )}
+           </div>
         </div>
 
         {/* 3. Gradient Fade (Only visible when collapsed) */}

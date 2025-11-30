@@ -17,7 +17,7 @@ pool.on('connect', () => {
 
 pool.on('error', (err) => {
   console.error("❌ Unexpected error on idle database client", err);
-  process.exit(-1);
+  // process.exit(-1);
 });
 
 export default pool;

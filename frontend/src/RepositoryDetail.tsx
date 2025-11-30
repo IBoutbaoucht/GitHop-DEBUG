@@ -27,8 +27,9 @@ import {
   Coffee,
   TrendingUp,
   ShieldCheck,
-  ChevronDown, // Add this
-  ChevronUp    // Add this
+  ChevronDown, 
+  ChevronUp,
+  Sparkles // NEW: Added Sparkles icon for AI
 } from "lucide-react"
 import {
   AreaChart,
@@ -39,7 +40,16 @@ import {
   YAxis,
   ResponsiveContainer,
 } from "recharts"
-import ReadmeViewer from "./components/ReadmeViewer" // Add this import
+
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeHighlight from 'rehype-highlight';
+import 'highlight.js/styles/github-dark.css'; // Import the code style you want
+
+
+// CSS for the markdown look and code highlighting
+import 'highlight.js/styles/github-dark.css'; 
+import 'github-markdown-css/github-markdown.css';
 
 // --- Interfaces ---
 
@@ -127,6 +137,24 @@ interface DetailedRepo extends Repository {
 }
 
 // --- Constants & Helpers ---
+
+// Simple Readme Component
+function ReadmeViewer({ readmeContent }: { readmeContent: string | undefined }) {
+  if (!readmeContent || readmeContent === 'NO_README_FOUND') return null;
+
+  return (
+    <div className="bg-gray-900/40 backdrop-blur-md rounded-2xl border border-white/5 p-6 overflow-hidden">
+      <div className="markdown-body dark !bg-transparent !text-gray-300">
+        <ReactMarkdown 
+          remarkPlugins={[remarkGfm]} 
+          rehypePlugins={[rehypeHighlight]}
+        >
+          {readmeContent}
+        </ReactMarkdown>
+      </div>
+    </div>
+  );
+}
 
 const API_BASE = "/api"
 
@@ -217,7 +245,11 @@ function RepositoryDetail() {
   const [commits, setCommits] = useState<Commit[]>([])
   const [repoRank, setRepoRank] = useState<number | null>(null)
   const [isLoading, setIsLoading] = useState(true)
-  const [isDescExpanded, setIsDescExpanded] = useState(false); // Add this
+  const [isDescExpanded, setIsDescExpanded] = useState(false); 
+  
+  // NEW: AI Summary States
+  const [aiSummary, setAiSummary] = useState<string | null>(null);
+  const [isSummarizing, setIsSummarizing] = useState(false);
   
   const initialSource = searchParams.get('source');
 
@@ -281,6 +313,26 @@ function RepositoryDetail() {
       setIsLoading(false)
     }
   }
+
+  // --- NEW: Handle AI Summary ---
+  const handleSummarize = async () => {
+    if (!repo?.readme_snippet) return;
+    
+    setIsSummarizing(true);
+    try {
+      const res = await fetch(`${API_BASE}/summarize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: repo.readme_snippet })
+      });
+      const data = await res.json();
+      setAiSummary(data.summary);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsSummarizing(false);
+    }
+  };
 
   const fetchRepoRank = async (repoId: number, sourceTable: string) => {
     try {
@@ -444,6 +496,29 @@ function RepositoryDetail() {
                 )}
               </button>
             )}
+
+            {/* --- NEW: AI Summary Section --- */}
+             <div className="mt-6">
+               {!aiSummary ? (
+                 <button 
+                   onClick={handleSummarize}
+                   disabled={isSummarizing || !repo.readme_snippet}
+                   className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 rounded-lg text-sm font-bold text-white shadow-lg hover:shadow-purple-500/25 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                 >
+                   <Sparkles className={`w-4 h-4 ${isSummarizing ? 'animate-spin' : ''}`} />
+                   {isSummarizing ? 'Generating Summary...' : 'Summarize with AI'}
+                 </button>
+               ) : (
+                 <div className="bg-purple-900/20 border border-purple-500/30 rounded-xl p-4 animate-in fade-in slide-in-from-bottom-2">
+                   <div className="flex items-center gap-2 mb-2 text-purple-300 text-xs font-bold uppercase tracking-wider">
+                     <Sparkles className="w-3 h-3" /> AI Summary
+                   </div>
+                   <p className="text-purple-100 font-medium leading-relaxed">
+                     {aiSummary}
+                   </p>
+                 </div>
+               )}
+             </div>
           </div>
 
           {/* QUICK LINKS ROW */}
@@ -477,8 +552,8 @@ function RepositoryDetail() {
           {/* LEFT COLUMN: Community & Code */}
           <div className="lg:col-span-2 space-y-8">
             
-            <ReadmeViewer content={repo.readme_snippet} repoName={repo.name} />
-
+              <ReadmeViewer readmeContent={repo.readme_snippet} />
+              
             {/* 1. CONTRIBUTORS */}
             {repo.contributors && repo.contributors.length > 0 && (
               <div className="bg-gray-900/40 backdrop-blur-md rounded-2xl border border-white/5 p-8 relative overflow-hidden">

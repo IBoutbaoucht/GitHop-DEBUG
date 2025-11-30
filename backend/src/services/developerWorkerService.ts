@@ -1,6 +1,7 @@
 import pool from '../db.js';
 import { GraphQLClient, gql } from 'graphql-request';
 import { DeveloperPersonas, CurrentWorkStatus, PrimaryWorkStatus, RepoLink, LanguageExpertise, LanguageStats, DeveloperBadge } from '../types/developerModels.js';
+import { PERSONA_DEFINITIONS } from '../constants/personas.js'; // Ensure .js extension for Node ESM
 
 const GITHUB_GRAPHQL_URL = 'https://api.github.com/graphql';
 
@@ -21,7 +22,7 @@ class developerWorkerService {
 
   public async runAllMissions(): Promise<void> {
     console.log("🚀 Starting Global Developer Sync...");
-    // await this.syncHallOfFame();
+    await this.syncHallOfFame();
     await this.syncTrendingExperts();
     await this.syncBadgeHolders();
     await this.syncRisingStars();
@@ -521,7 +522,7 @@ class developerWorkerService {
 
   // --- HELPERS (Keep as is) ---
 
-  private async calculatePrimaryWork(repos: any[], ownerLogin: string): Promise<PrimaryWorkStatus> {
+private async calculatePrimaryWork(repos: any[], ownerLogin: string): Promise<PrimaryWorkStatus> {
     if (repos.length === 0) return { status: 'single_masterpiece', repos: [] };
 
     const scoredRepos = await Promise.all(repos.map(async (repo: any) => {
@@ -530,7 +531,16 @@ class developerWorkerService {
         const size = repo.diskUsage || 0;
         const isSystemLang = ['C', 'C++', 'Rust', 'Go'].includes(repo.primaryLanguage?.name);
 
-        let score = (stars * 0.4) + (commits * 0.6);
+        // FIX: "Magnum Opus" Logic
+        // Old (Flawed): let score = (stars * 0.4) + (commits * 0.6);
+        // New (Improved): 
+        // 1. Stars are linear (Impact is the primary driver).
+        // 2. Commits are logarithmic (Diminishing returns for "commit spam").
+        //    Math.log10(100) = 2, Math.log10(10000) = 4. 
+        //    Multiplying by 20 gives a nice "effort bonus" without overpowering stars.
+        let score = stars + (Math.log10(commits + 1) * 20);
+
+        // Bonus for large, complex system projects
         if (isSystemLang && size > 10000) score *= 1.2; 
 
         const internalLink = await this.findInternalRepo(repo.owner.login, repo.name, repo);
@@ -548,11 +558,14 @@ class developerWorkerService {
         } as RepoLink;
     }));
 
+    // Sort by the new intelligent score
     scoredRepos.sort((a, b) => (b.effort_score || 0) - (a.effort_score || 0));
+    
     const winner = scoredRepos[0];
     const runnerUp = scoredRepos[1];
 
-    if (runnerUp && (runnerUp.effort_score! >= winner.effort_score! * 0.9)) {
+    // Threshold for "Dual Wielding" (Runner up must be at least 85% as impressive as the winner)
+    if (runnerUp && (runnerUp.effort_score! >= winner.effort_score! * 0.85)) {
         return { status: 'dual_wielding', repos: [winner, runnerUp] };
     }
     return { status: 'single_masterpiece', repos: [winner] };
@@ -599,11 +612,14 @@ class developerWorkerService {
 
   private async findInternalRepo(owner: string, name: string, repoData: any = null): Promise<{ internal_repo_id?: number }> {
     const fullName = `${owner}/${name}`;
-    const res = await pool.query(`SELECT id FROM repositories WHERE full_name = $1 LIMIT 1`, [fullName]);
-    if (res.rows.length > 0) return { internal_repo_id: res.rows[0].id };
+    
+    // 1. Check if it exists first (Optimization)
+    const checkRes = await pool.query(`SELECT id FROM repositories WHERE full_name = $1`, [fullName]);
+    if (checkRes.rows.length > 0) return { internal_repo_id: checkRes.rows[0].id };
 
     if (repoData && repoData.databaseId) {
       try {
+        // 2. Insert or Update to ensure ID return
         const insertQuery = `
           INSERT INTO repositories (
             github_id, full_name, name, owner_login, description, html_url, 
@@ -612,9 +628,11 @@ class developerWorkerService {
             is_fork, is_archived, is_disabled, visibility, 
             sync_status, categories, last_fetched
           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 'stub', ARRAY['stub'], NOW())
-          ON CONFLICT (github_id) DO NOTHING
+          ON CONFLICT (github_id) 
+          DO UPDATE SET last_fetched = NOW() -- Dummy update to ensure RETURNING id works
           RETURNING id
         `;
+        
         const res = await pool.query(insertQuery, [
           repoData.databaseId, fullName, name, owner, repoData.description || '', repoData.url, 
           repoData.stargazerCount || 0, repoData.primaryLanguage?.name, repoData.pushedAt,
@@ -622,61 +640,59 @@ class developerWorkerService {
           repoData.forkCount || 0, repoData.diskUsage || 0,
           false, false, false, 'public'
         ]);
+        
         if (res.rows.length > 0) return { internal_repo_id: res.rows[0].id };
-      } catch (e: any) { }
+      } catch (e: any) { 
+         console.error("Repo insert error", e.message);
+      }
     }
     return {};
   }
 
+
   private calculatePersonas(repos: any[], bio: string): DeveloperPersonas {
-    const p: any = { 
-      ai_whisperer: 0, ml_engineer: 0, data_scientist: 0, computational_scientist: 0, data_engineer: 0,
-      chain_architect: 0, cloud_native: 0, devops_deamon: 0, 
-      frontend_wizard: 0, ux_engineer: 0, mobile_maestro: 0,
-      backend_behemoth: 0, systems_architect: 0, security_sentinel: 0,
-      game_guru: 0, iot_tinkerer: 0, 
-      tooling_titan: 0, algorithm_alchemist: 0, qa_automator: 0,
-      enterprise_architect: 0
-    };
+    // 1. Initialize all scores to 0
+    const p: Record<string, number> = {};
+    PERSONA_DEFINITIONS.forEach(def => {
+        p[def.id] = 0;
+    });
     
     const bioLower = bio.toLowerCase();
 
-    const score = (text: string, weight: number) => {
-      if (/\b(gpt|llm|transformer|neural|generative ai)\b/.test(text)) p.ai_whisperer += weight * 2;
-      if (/\b(pytorch|tensorflow|keras|training|inference|huggingface|model)\b/.test(text)) p.ml_engineer += weight * 1.5;
-      if (/\b(pandas|numpy|jupyter|matplotlib|analysis|visualization|insight)\b/.test(text)) p.data_scientist += weight;
-      if (/\b(math|mathematics|physics|simulation|scientific|scipy|sympy|julia|fortran|manim|latex|geometry|calculus)\b/.test(text)) p.computational_scientist += weight * 2;
-      if (/\b(etl|pipeline|spark|hadoop|airflow|databricks|warehouse|big data|parquet)\b/.test(text)) p.data_engineer += weight * 1.5;
-      if (/\b(solidity|smart contract|ethereum|web3|defi|nft|dapp|consensus)\b/.test(text)) p.chain_architect += weight * 2;
-      if (/\b(kubernetes|k8s|docker|terraform|aws|gcp|azure|serverless|cloud)\b/.test(text)) p.cloud_native += weight * 1.5;
-      if (/\b(ci\/cd|pipeline|jenkins|github actions|automation|sre|observability)\b/.test(text)) p.devops_deamon += weight;
-      if (/\b(react|vue|angular|svelte|nextjs|tailwind|css|html|frontend)\b/.test(text)) p.frontend_wizard += weight;
-      if (/\b(figma|design system|accessibility|ui\/ux|interaction|animation|canvas)\b/.test(text)) p.ux_engineer += weight * 1.5;
-      if (/\b(api|graphql|rest|sql|postgres|redis|kafka|microservices|distributed|node|express)\b/.test(text)) p.backend_behemoth += weight;
-      if (/\b(kernel|os|operating system|driver|memory|concurrency|compiler|assembly|embedded|low-level)\b/.test(text)) p.systems_architect += weight * 2.5;
-      if (/\b(rust|c|c\+\+|zig)\b/.test(text)) p.systems_architect += weight;
-      if (/\b(ios|android|swift|kotlin|flutter|react native|mobile app)\b/.test(text)) p.mobile_maestro += weight * 2;
-      if (/\b(security|pentest|hacking|cryptography|auth|oauth|owasp|vulnerability|red team)\b/.test(text)) p.security_sentinel += weight * 2;
-      if (/\b(unity|unreal|godot|game|graphics|shader|opengl|vulkan|3d)\b/.test(text)) p.game_guru += weight * 2;
-      if (/\b(arduino|raspberry|esp32|firmware|robotics|sensor|iot|mqtt)\b/.test(text)) p.iot_tinkerer += weight * 2;
-      if (/\b(cli|terminal|plugin|package|library|config|linter|bundler|npm|shell|bash|zsh|dotfiles)\b/.test(text)) p.tooling_titan += weight * 1.5;
-      if (/\b(algorithm|structure|leetcode|interview|competitive|solution)\b/.test(text)) p.algorithm_alchemist += weight * 2;
-      if (/\b(testing|selenium|cypress|playwright|qa|automation|e2e)\b/.test(text)) p.qa_automator += weight * 2;
-      if (/\b(java|spring|c#|dotnet|enterprise|legacy|soap|architecture)\b/.test(text)) p.enterprise_architect += weight;
+    // 2. Generic Scoring Function
+    const applyScore = (text: string, baseWeight: number) => {
+      PERSONA_DEFINITIONS.forEach(def => {
+        // Create regex from keywords dynamically: \b(word1|word2|word3)\b
+        // We join keywords with | and escape any special regex chars if necessary
+        const pattern = new RegExp(`\\b(${def.keywords.join('|')})\\b`, 'i');
+        
+        if (pattern.test(text)) {
+           p[def.id] += baseWeight * def.weight;
+        }
+      });
     };
 
-    score(bioLower, 50);
+    // 3. Score Bio
+    applyScore(bioLower, 50);
 
+    // 4. Score Repos
     repos.forEach((r: any) => {
       const text = ((r.name || "") + " " + (r.description || "") + " " + (r.primaryLanguage?.name || "") + " " + (r.repositoryTopics?.nodes?.map((t:any) => t.topic.name).join(" ") || "")).toLowerCase();
+      
       const isCuration = /\b(awesome|list|collection|resources|roadmap|interview)\b/.test(r.name.toLowerCase()) || /\b(curated list|collection of)\b/.test(r.description?.toLowerCase() || "");
+      
       const starLog = Math.log10((r.stargazerCount || 0) + 1);
       let dynamicWeight = 10 + (starLog * 5);
+      
       if (isCuration) dynamicWeight *= 0.1;
-      score(text, dynamicWeight);
+      
+      applyScore(text, dynamicWeight);
     });
+
+    // 5. Cap scores at 100
     Object.keys(p).forEach(k => p[k] = Math.min(100, Math.round(p[k])));
-    return p;
+    
+    return p as DeveloperPersonas;
   }
 
   private calculateLanguageExpertise(repos: any[], login: string): LanguageStats {

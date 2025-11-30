@@ -7,6 +7,30 @@ import cors from "cors";
 import githubService from "./services/githubService.js";
 import workerService from './services/workerService.js';
 import developerWorkerService from "./services/developerWorkerService.js";
+import { generateSummary } from "./services/aiServices/aiService.js"; // Import the new service
+// import rateLimit from 'express-rate-limit';
+
+// 1. Import the service
+import { embedRepositories, generateEmbeddingLocal } from "./services/aiServices/embeddingService.js";
+import { searchIntelligently } from "./services/aiServices/searchAgentService.js";
+
+import readmeWorkerService from "./services/fetchings/readmeWorkerService.js";
+import commitActivityWorkerService from "./services/fetchings/commitActivityWorkerService.js";
+import contributorsWorkerService from "./services/fetchings/contributorsWorkerService.js";
+import commitsWorkerService from "./services/fetchings/commitsWorkerService.js";
+
+import newService from "./services/newService.js";
+
+
+// // Define Limiter: 100 requests per 15 minutes per IP
+// const apiLimiter = rateLimit({
+//   windowMs: 15 * 60 * 1000, 
+//   max: 100, 
+//   standardHeaders: true, 
+//   legacyHeaders: false, 
+//   message: { error: "Too many requests, please try again later." }
+// });
+
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,6 +41,10 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
+
+// Apply to search/list endpoints
+// app.use("/api/developers", apiLimiter);
+// app.use("/api/repos", apiLimiter);
 
 // =============================================================================
 // HELPER: Resolve Local ID to GitHub ID
@@ -33,9 +61,97 @@ app.post('/test' , async (req, res) => {
    res.status(202).json({ message: "Test trigger received." });
 })
 
+// --- NEW: GH ARCHIVE (BIGQUERY) SYNC ENDPOINTS ---
+app.post('/api/sync/gharchive/weekly', async (req, res) => {
+  newService.syncWeekly();
+  res.status(202).json({ message: "Weekly trends fetch started (GH Archive)." });
+});
+
+app.post('/api/sync/gharchive/monthly', async (req, res) => {
+  newService.syncMonthly();
+  res.status(202).json({ message: "Monthly trends fetch started (GH Archive)." });
+});
+
+app.post('/api/sync/gharchive/quarterly', async (req, res) => {
+  newService.syncQuarterly();
+  res.status(202).json({ message: "Quarterly trends fetch started (GH Archive)." });
+});
+
+
+// A. Smart Search Endpoint
+app.get("/api/search/smart", async (req, res) => {
+  try {
+    const q = req.query.q as string;
+    if (!q) return res.status(400).json({ error: "Query required" });
+
+    // 1. Get results from Agent (Hybrid Vector + SQL)
+    const results = await searchIntelligently(q);
+    
+    res.json({ data: results });
+  } catch (error: any) {
+    console.error("Smart search failed:", error);
+    res.status(500).json({ error: "AI Search failed" });
+  }
+});
+
+// B. Admin Trigger: Start Embedding Process (Manual)
+app.post("/api/admin/embed-repos", async (req, res) => {
+  try {
+    // Start background process (do not await)
+    embedRepositories().catch(err => console.error("Background embedding failed:", err));
+    res.json({ message: "🚀 Embedding process started in background." });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
+// 
+// --- NEW ENDPOINT: AI Summarization ---
+app.post("/api/summarize", async (req, res) => {
+  try {
+    const { content } = req.body;
+    if (!content) return res.status(400).json({ error: "Content is required" });
+
+    const summary = await generateSummary(content);
+    res.json({ summary });
+  } catch (error: any) {
+    res.status(500).json({ error: "Failed to generate summary" });
+  }
+});
 // =============================================================================
 // 1. SYNC TRIGGERS (CORE DATA FETCHING)
 // =============================================================================
+
+// Those fetch Missings .
+app.post("/api/workers/readme", async (req, res) => {
+  try {
+    readmeWorkerService.updateMissingReadmes().catch(console.error);
+    res.json({ message: "Background job: Fetching missing READMEs started." });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/api/workers/activity", async (req, res) => {
+  try {
+    commitActivityWorkerService.updateMissingCommitActivity().catch(console.error);
+    res.json({ message: "Background job: Fetching missing Commit Activity started." });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/api/workers/contributors", async (req, res) => {
+  try {
+    contributorsWorkerService.updateMissingContributors().catch(console.error);
+    res.json({ message: "Background job: Fetching missing Contributors started." });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/api/workers/commits", async (req, res) => {
+  try {
+    commitsWorkerService.updateMissingRecentCommits().catch(console.error);
+    res.json({ message: "Background job: Fetching missing Recent Commits started." });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 
 app.post('/fetch-growing', async (req, res) => {
   try {
@@ -189,6 +305,8 @@ app.post("/api/workers/runByOrder", async (req, res) => {
 // DEVELOPER ENDPOINTS
 
 // GET /api/developers
+// GET /api/developers (Now with Pagination)
+// GET /api/developers (With Server-Side Search & Pagination)
 app.get("/api/developers", async (req, res) => {
   try {
     const {
@@ -196,62 +314,73 @@ app.get("/api/developers", async (req, res) => {
       language,
       persona,
       badge,
-      limit = 20000 
+      q,          // <--- NEW: Accept search query
+      limit = 30, 
+      cursor
     } = req.query;
 
+    const limitNum = Math.min(parseInt(limit as string) || 30, 100);
+    
+    // Decode Cursor
+    let lastFollowers = null;
+    let lastId = null;
+    if (cursor) {
+        try {
+            const decoded = JSON.parse(Buffer.from(cursor as string, 'base64').toString('ascii'));
+            lastFollowers = decoded.f;
+            lastId = decoded.i;
+        } catch (e) { /* ignore invalid cursor */ }
+    }
+
     let where = [];
-    let params = [];
+    let params: any[] = [];
     let idx = 1;
 
-    // -----------------------------
-    // NEW BOOLEAN FILTERING
-    // -----------------------------
-    if (type === "top") {
-      where.push(`d.is_hall_of_fame = TRUE`);
-    } 
-    else if (type === "expert") {
-      where.push(`d.is_trending_expert = TRUE`);
-    }
-    else if (type === "rising") {
-      where.push(`d.is_rising_star = TRUE`);
-    }
-    else if (type === "badge") {
-      where.push(`d.is_badge_holder = TRUE`);
-    }
-    else {
-      where.push(`d.followers_count >= 0`);
+    // 1. BASE FILTERS
+    if (type === "top") where.push(`d.is_hall_of_fame = TRUE`);
+    else if (type === "expert") where.push(`d.is_trending_expert = TRUE`);
+    else if (type === "rising") where.push(`d.is_rising_star = TRUE`);
+    else if (type === "badge") where.push(`d.is_badge_holder = TRUE`);
+    else where.push(`d.followers_count >= 0`);
+
+    // 2. TEXT SEARCH (NEW LOGIC)
+    if (q) {
+      // Search login, name, or bio case-insensitively
+      where.push(`(d.login ILIKE $${idx} OR d.name ILIKE $${idx} OR d.bio ILIKE $${idx})`);
+      params.push(`%${q}%`); // Add wildcards for partial match
+      idx++;
     }
 
-    // -----------------------------
-    // ADDITIONAL FILTERS
-    // -----------------------------
-    
-    // Language Filter
+    // 3. ADDITIONAL FILTERS
     if (language) {
       where.push(`d.dominant_language = $${idx}`);
       params.push(language);
       idx++;
     }
 
-    // Persona Filter
     if (persona) {
       where.push(`(d.personas->>$${idx})::int > 0`);
       params.push(persona);
       idx++;
     }
 
-    // Specific Badge Type Filter (e.g. 'MVP', 'GDE')
     if (badge) {
       where.push(`
         EXISTS (
-          SELECT 1
-          FROM jsonb_array_elements(d.badges) AS b
-          WHERE LOWER(b->>'type') = LOWER($${idx})
-            OR LOWER(b->>'category') = LOWER($${idx})
+          SELECT 1 FROM jsonb_array_elements(d.badges) AS b
+          WHERE LOWER(b->>'type') = LOWER($${idx}) 
+             OR LOWER(b->>'category') = LOWER($${idx})
         )
       `);
       params.push(badge);
       idx++;
+    }
+
+    // 4. PAGINATION LOGIC
+    if (lastFollowers !== null && lastId !== null) {
+        where.push(`(d.followers_count, d.id) < ($${idx}, $${idx+1})`);
+        params.push(lastFollowers, lastId);
+        idx += 2;
     }
 
     const whereSQL = where.length ? "WHERE " + where.join(" AND ") : "";
@@ -275,14 +404,23 @@ app.get("/api/developers", async (req, res) => {
       LEFT JOIN developer_top_repos t ON d.id = t.developer_id
       ${whereSQL}
       GROUP BY d.id
-      ORDER BY d.followers_count DESC
+      ORDER BY d.followers_count DESC, d.id DESC
       LIMIT $${idx};
     `;
 
-    params.push(limit);
+    params.push(limitNum);
 
     const { rows } = await pool.query(query, params);
-    res.json({ data: rows });
+    
+    // Create Next Cursor
+    let nextCursor = null;
+    if (rows.length === limitNum) {
+        const lastItem = rows[rows.length - 1];
+        const cursorPayload = JSON.stringify({ f: lastItem.followers_count, i: lastItem.id });
+        nextCursor = Buffer.from(cursorPayload).toString('base64');
+    }
+
+    res.json({ data: rows, nextCursor });
 
   } catch (err) {
     console.error("Error fetching developers:", err);
@@ -330,34 +468,64 @@ app.get("/api/repos/filter", async (req, res) => {
     const { q, language, topic, min_stars, sort_by, source } = req.query;
     const searchText = q ? `%${q}%` : null;
     
+    // Base filters
     const whereClauses = [
-      `($1::text IS NULL OR r.name ILIKE $1 OR r.description ILIKE $1)`,
+      `($1::text IS NULL OR r.name ILIKE $1 OR r.description ILIKE $1 OR r.readme_snippet ILIKE $1)`,
       `($2::text IS NULL OR r.language = $2)`,
       `($3::text IS NULL OR $3 = ANY(r.topics))`,
       `r.stars_count >= $4`
     ];
     
+    let category = 'top';
+    // Default sort: Total stars (for standard views)
+    let orderByClause = `r.stars_count DESC`; 
+
+    // --- FIX: Dynamic Sorting based on Source ---
     if (source) {
-      let category = 'top';
-      if (source === 'growings') category = 'growing';
-      if (source === 'trendings') category = 'trending';
+      const s = source as string;
+
+      if (s === 'growings') category = 'growing';
+      else if (s === 'trendings') category = 'trending';
+      
+      // Strict Mapping for Trends + CRITICAL SORT LOGIC FIX
+      else if (s === 'trending_weekly') {
+        category = 'trending_weekly';
+        // Sort by 7-day growth, NOT total stars. NULLS LAST puts repos with 0 growth at the bottom.
+        orderByClause = `rs.stars_growth_7d DESC NULLS LAST`; 
+      }
+      else if (s === 'trending_monthly') {
+        category = 'trending_monthly';
+        orderByClause = `rs.stars_growth_30d DESC NULLS LAST`; 
+      }
+      else if (s === 'trending_quarterly') {
+        category = 'trending_quarterly';
+        orderByClause = `rs.stars_growth_90d DESC NULLS LAST`; 
+      }
+      
+      else if (['stub', 'complete'].includes(s)) category = s;
+      
       whereClauses.push(`'${category}' = ANY(r.categories)`);
     }
     
+    // Allow manual override ONLY if the user explicitly clicked a sort button
+    if (sort_by) {
+        if (sort_by === 'updated') orderByClause = `r.updated_at DESC`;
+        else if (sort_by === 'stars') orderByClause = `r.stars_count DESC`;
+        else if (sort_by === 'forks') orderByClause = `r.forks_count DESC`;
+    }
+
     const whereClause = whereClauses.join(' AND ');
     
     const queryText = `
       SELECT 
         r.*, 
         rs.days_since_last_commit, rs.activity_score, rs.health_score,
-        rs.commits_last_year, rs.latest_release_tag, rs.total_releases
+        rs.commits_last_year, rs.latest_release_tag, rs.total_releases,
+        rs.stars_growth_7d, rs.stars_growth_30d, rs.stars_growth_90d -- Return growth stats
       FROM repositories r
       LEFT JOIN repository_stats rs ON r.github_id = rs.repo_github_id
       WHERE ${whereClause}
-      ORDER BY 
-        CASE WHEN $5 = 'newest' THEN r.created_at END DESC,
-        CASE WHEN $5 = 'updated' THEN r.updated_at END DESC,
-        r.stars_count DESC
+      ORDER BY ${orderByClause}
       LIMIT 100
     `;
     
@@ -365,8 +533,7 @@ app.get("/api/repos/filter", async (req, res) => {
       searchText, 
       language, 
       topic, 
-      min_stars ? parseInt(String(min_stars)) : 0, 
-      sort_by
+      min_stars ? parseInt(String(min_stars)) : 0
     ]);
     
     res.json({ data: rows });
@@ -627,6 +794,10 @@ app.get('*', (req, res) => {
 const port = process.env.PORT || 4000;
 app.listen(port, () => {
   console.log(`\n🌐 Server running on http://localhost:${port}`);
+
+  console.log("🔥 Warming up AI model...");
+  generateEmbeddingLocal("warmup"); 
+  console.log("✅ AI Model Ready.");
 
   if (process.env.SYNC_DATA_ON_STARTUP === 'true') {
     (async () => {
