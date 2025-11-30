@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     environment:
       - POSTGRES_DB=github_trending
       - POSTGRES_USER=postgres
@@ -25,6 +25,8 @@ services:
     # Uncomment the next two lines if you still want direct access via port 4000:
     # ports:
     #   - "4000:4000"
+    env_file:
+      - .env
     environment:
       - PGHOST=db
       - PGPORT=5432
